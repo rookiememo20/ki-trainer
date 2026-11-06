@@ -68,7 +68,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>🥊 KI-Trainer <span class="ver">v4 ·Push-ups & Schläge zählen</span></h1>
+  <h1>🥊 KI-Trainer <span class="ver">v5 · Push-ups & Schläge zählen</span></h1>
 
   <div class="tabs">
     <button class="tab active" data-mode="pushup">💪 Push-ups</button>
@@ -117,6 +117,11 @@
     <div class="bars">
       <div class="bar"><span style="width:62px;color:var(--left)">Links</span><div class="track"><div class="fill" id="sigL" style="background:var(--left)"></div><div class="mark"></div></div></div>
       <div class="bar"><span style="width:62px;color:var(--right)">Rechts</span><div class="track"><div class="fill" id="sigR" style="background:var(--right)"></div><div class="mark"></div></div></div>
+    </div>
+    <div class="card tips" id="diag" style="margin-bottom:10px">
+      <b>Messwerte letzte Bewegung</b> (✅ = reicht für einen Schlag)<br>
+      <span style="color:var(--left)">Links:</span> <span id="dL">–</span><br>
+      <span style="color:var(--right)">Rechts:</span> <span id="dR">–</span>
     </div>
     <div class="controls">
       <select id="roundLen">
@@ -233,7 +238,12 @@ class PunchArm {
   constructor() { this.reset(); }
   reset() {
     this.count = 0; this.armed = true; this.buf = []; this.peak = 0; this.firedAt = -1e9;
-    this.sig = 0; this.rawD = []; this.rawE = []; this.ext = 0;
+    this.sig = 0; this.rawD = []; this.rawE = []; this.ext = 0; this.diag = [];
+  }
+  recent() {   // für die Anzeige: höchste Weite (1 = genug) und Streckung der letzten 1,5 s
+    let r = 0, e = 0;
+    for (const d of this.diag) { r = Math.max(r, d.r); e = Math.max(e, d.e); }
+    return { r, e };
   }
   update(Draw, extRaw, t, S) {
     // Hand war kurz verdeckt → alten Verlauf verwerfen (sonst zählt der "Sprung" beim Wiederauftauchen)
@@ -249,6 +259,8 @@ class PunchArm {
     let base = Infinity;
     for (const b of this.buf) base = Math.min(base, b.D);
     this.sig = Math.min((D - base) / S.rise, ext / S.minExt);
+    this.diag.push({ t, r: (D - base) / S.rise, e: ext });
+    while (this.diag.length && t - this.diag[0].t > 1500) this.diag.shift();
     if (this.armed) {
       if (D - base >= S.rise && ext >= S.minExt && t - this.firedAt > 160) {
         this.armed = false; this.peak = D; this.firedAt = t; this.count++;
@@ -410,7 +422,11 @@ function updateBox(lm, wl) {
     if ((lm[w].visibility ?? 1) < 0.2) continue;
     seen++;
     const e = ARMS[key][1];
-    const ext = dist(wl[s], wl[w]) / ((dist(wl[s], wl[e]) + dist(wl[e], wl[w])) || 1);   // 1 = Arm ganz gestreckt
+    // Armstreckung (1 = ganz gestreckt). 3D-Schätzung ist beim hinteren, halb verdeckten Arm oft zu "gebeugt".
+    // Im 2D-Bild bleibt ein gerader Arm aus jedem Blickwinkel gerade → wir nehmen den größeren Wert.
+    const ext3 = dist(wl[s], wl[w]) / ((dist(wl[s], wl[e]) + dist(wl[e], wl[w])) || 1);
+    const ext2 = d2(lm[s], lm[w]) / ((d2(lm[s], lm[e]) + d2(lm[e], lm[w])) || 1);
+    const ext = Math.max(ext3, ext2);
     sides[key] = { dHead: dist(head, wl[w]), dSh: dist(wl[s], wl[w]), ext, pos: { x: lm[w].x, y: lm[w].y } };
   }
   for (const key of box.update(sw, sides, now, S)) beep(key === "L" ? 620 : 900, 0.06);
@@ -458,6 +474,11 @@ function render() {
     $("bRate").textContent = mins > 0.1 ? Math.round(total / mins) : "–";
     $("sigL").style.width = Math.max(0, Math.min(1, box.L.sig / 1.5)) * 100 + "%";
     $("sigR").style.width = Math.max(0, Math.min(1, box.R.sig / 1.5)) * 100 + "%";
+    for (const k of ["L", "R"]) {
+      const { r, e } = box[k].recent();
+      $("d" + k).textContent =
+        `Weite ${Math.round(r * 100)} % ${r >= 1 ? "✅" : "❌"} · Streckung ${e.toFixed(2)} ${e >= S.minExt ? "✅" : "❌"} (braucht ${S.minExt.toFixed(2)})`;
+    }
     const r = box.round;
     if (r.running) {
       $("bRound").textContent = fmt((r.end - Date.now()) / 1000);
