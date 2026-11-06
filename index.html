@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <title>KI-Trainer – Push-ups & Schläge zählen</title>
 <style>
   :root{
@@ -13,13 +14,14 @@
   html,body{margin:0;background:var(--bg);color:var(--text);
     font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
   .wrap{max-width:1000px;margin:0 auto;padding:14px}
-  h1{font-size:1.25rem;margin:4px 0 12px;display:flex;gap:8px;align-items:center}
+  h1{font-size:1.25rem;margin:4px 0 12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .ver{font-size:.75rem;color:var(--muted);font-weight:400}
   .tabs{display:flex;gap:8px;margin-bottom:12px}
   .tab{flex:1;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--panel);
     color:var(--text);font-size:1rem;font-weight:600;cursor:pointer}
   .tab.active{background:var(--accent);border-color:var(--accent);color:#06240f}
-  .stage{position:relative;width:100%;background:#000;border-radius:16px;overflow:hidden;
-    aspect-ratio:16/9;border:1px solid var(--line)}
+  .stage{position:relative;width:100%;max-height:75vh;background:#000;border-radius:16px;overflow:hidden;
+    aspect-ratio:16/9;border:1px solid var(--line);margin:0 auto}
   .stage video,.stage canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
   .mirror{transform:scaleX(-1)}
   .placeholder{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
@@ -35,7 +37,7 @@
   .feedback.warn{color:var(--warn)}
   .depth{position:absolute;right:12px;top:12%;bottom:12%;width:18px;border-radius:9px;
     background:rgba(255,255,255,.15);overflow:hidden}
-  .depth>div{position:absolute;bottom:0;left:0;right:0;background:var(--accent);transition:height .08s}
+  .depth>div{position:absolute;top:0;left:0;right:0;background:var(--warn);transition:height .08s}
   .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:12px 0}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
   .card .v{font-size:1.6rem;font-weight:800}
@@ -45,8 +47,7 @@
   .bar .track{position:relative;flex:1;height:14px;background:var(--panel);border:1px solid var(--line);
     border-radius:7px;overflow:hidden}
   .bar .fill{position:absolute;left:0;top:0;bottom:0;width:0}
-  .bar .mark{position:absolute;top:0;bottom:0;width:2px;background:#fff}
-  .bar .mark.g{background:var(--muted)}
+  .bar .mark{position:absolute;top:0;bottom:0;width:2px;background:#fff;left:66.6%}
   .controls{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
   button.btn{padding:12px 16px;border-radius:12px;border:1px solid var(--line);background:var(--panel);
     color:var(--text);font-size:.95rem;font-weight:600;cursor:pointer}
@@ -56,18 +57,18 @@
   details{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 14px;margin:10px 0}
   summary{cursor:pointer;font-weight:600}
   .row{display:flex;align-items:center;gap:10px;margin:10px 0;flex-wrap:wrap}
-  .row label{min-width:190px;font-size:.9rem}
+  .row label{min-width:200px;font-size:.9rem}
   .row input[type=range]{flex:1;min-width:150px}
-  .row output{min-width:44px;text-align:right;font-variant-numeric:tabular-nums}
+  .row output{min-width:48px;text-align:right;font-variant-numeric:tabular-nums}
   .tips{font-size:.88rem;color:var(--muted);line-height:1.55}
   .tips b{color:var(--text)}
-  select{background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:6px}
+  select{background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px}
   .hidden{display:none !important}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>🥊 KI-Trainer <span style="font-weight:400;color:var(--muted);font-size:.9rem">Push-ups & Schläge zählen</span></h1>
+  <h1>🥊 KI-Trainer <span class="ver">v2 · Push-ups & Schläge zählen</span></h1>
 
   <div class="tabs">
     <button class="tab active" data-mode="pushup">💪 Push-ups</button>
@@ -97,9 +98,10 @@
   <div id="pushPanel">
     <div class="stats">
       <div class="card"><div class="v" id="pCount">0</div><div class="k">Push-ups</div></div>
-      <div class="card"><div class="v" id="pAngle">–</div><div class="k">Ellbogenwinkel</div></div>
       <div class="card"><div class="v" id="pBad">0</div><div class="k">zu flach (nicht gezählt)</div></div>
       <div class="card"><div class="v" id="pRecord">0</div><div class="k">Rekord</div></div>
+      <div class="card"><div class="v" id="pAngle">–</div><div class="k">Ellbogenwinkel</div></div>
+      <div class="card"><div class="v" id="pHeight">–</div><div class="k">Schulterhöhe (1 = oben)</div></div>
     </div>
   </div>
 
@@ -113,8 +115,8 @@
       <div class="card"><div class="v" id="bRound">–</div><div class="k" id="bRoundLabel">Runde</div></div>
     </div>
     <div class="bars">
-      <div class="bar"><span style="width:62px;color:var(--left)">Links</span><div class="track"><div class="fill" id="extL" style="background:var(--left)"></div><div class="mark g" id="mGL"></div><div class="mark" id="mPL"></div></div></div>
-      <div class="bar"><span style="width:62px;color:var(--right)">Rechts</span><div class="track"><div class="fill" id="extR" style="background:var(--right)"></div><div class="mark g" id="mGR"></div><div class="mark" id="mPR"></div></div></div>
+      <div class="bar"><span style="width:62px;color:var(--left)">Links</span><div class="track"><div class="fill" id="sigL" style="background:var(--left)"></div><div class="mark"></div></div></div>
+      <div class="bar"><span style="width:62px;color:var(--right)">Rechts</span><div class="track"><div class="fill" id="sigR" style="background:var(--right)"></div><div class="mark"></div></div></div>
     </div>
     <div class="controls">
       <select id="roundLen">
@@ -127,25 +129,34 @@
   </div>
 
   <details>
-    <summary>⚙️ Einstellungen (Empfindlichkeit)</summary>
+    <summary>⚙️ Einstellungen</summary>
+    <div class="row"><label>KI-Modell</label>
+      <select id="sModel">
+        <option value="full" selected>Genau (empfohlen)</option>
+        <option value="lite">Schnell (für ältere Handys)</option>
+        <option value="heavy">Sehr genau (langsam)</option>
+      </select>
+    </div>
     <div id="pushSettings">
-      <div class="row"><label>Unten: Ellbogen kleiner als</label><input type="range" id="sDown" min="60" max="125" step="1" value="95"><output id="oDown">95°</output></div>
-      <div class="row"><label>Oben: Ellbogen größer als</label><input type="range" id="sUp" min="135" max="178" step="1" value="160"><output id="oUp">160°</output></div>
+      <div class="row"><label>Unten: Ellbogen kleiner als</label><input type="range" id="sDown" min="60" max="130" step="1" value="105"><output id="oDown">105°</output></div>
+      <div class="row"><label>Oben: Ellbogen größer als</label><input type="range" id="sUp" min="130" max="175" step="1" value="150"><output id="oUp">150°</output></div>
+      <div class="row"><label>Unten: Schulterhöhe kleiner als</label><input type="range" id="sHDown" min="0.20" max="0.75" step="0.01" value="0.55"><output id="oHDown">0.55</output></div>
+      <div class="row"><label>Oben: Schulterhöhe größer als</label><input type="range" id="sHUp" min="0.55" max="0.95" step="0.01" value="0.75"><output id="oHUp">0.75</output></div>
       <div class="row"><label>Zahl laut ansagen</label><input type="checkbox" id="sVoice" checked></div>
+      <div class="tips">Die App misst zwei Dinge: den Ellbogenwinkel und wie hoch deine Schultern über den Händen sind. Sie nimmt automatisch das Signal, das sich bei dir stärker bewegt. Der gelbe Balken rechts im Bild zeigt die Tiefe: ganz voll = unten erkannt.</div>
     </div>
     <div id="boxSettings" class="hidden">
-      <div class="row"><label>Schlag zählt ab Armstreckung</label><input type="range" id="sOut" min="0.70" max="0.97" step="0.01" value="0.84"><output id="oOut">0.84</output></div>
-      <div class="row"><label>Zurück in Deckung unter</label><input type="range" id="sGuard" min="0.40" max="0.80" step="0.01" value="0.65"><output id="oGuard">0.65</output></div>
-      <div class="tips">Die Balken oben zeigen live, wie gestreckt dein Arm ist (0 = ganz gebeugt, 1 = ganz gestreckt). Weißer Strich = Schlag-Schwelle, grauer Strich = Deckungs-Schwelle. Wenn Schläge nicht gezählt werden: weißen Strich nach links schieben. Wenn zu viel gezählt wird: nach rechts.</div>
+      <div class="row"><label>Empfindlichkeit (weniger = empfindlicher)</label><input type="range" id="sRise" min="0.20" max="1.20" step="0.01" value="0.45"><output id="oRise">0.45</output></div>
+      <div class="tips">Die Balken zeigen live, wie schnell und weit deine Hand von deinem Kopf weg schießt. Erreicht ein Balken den weißen Strich, zählt ein Schlag. Werden Schläge nicht gezählt: Wert kleiner machen. Wird zu viel gezählt (z. B. beim Hin- und Herbewegen): Wert größer machen.</div>
     </div>
   </details>
 
-  <details>
+  <details open>
     <summary>💡 So stellst du die Kamera auf</summary>
     <div class="tips">
-      <p><b>Push-ups:</b> Handy/Laptop <b>seitlich</b> von dir auf den Boden stellen, ca. 2 m entfernt, sodass Kopf bis Füße im Bild sind. Gezählt wird, wenn dein Ellbogen unten unter den Winkel geht und oben wieder fast gestreckt ist. Halbe Wiederholungen werden <b>nicht</b> gezählt.</p>
-      <p><b>Boxen:</b> Kamera auf Brusthöhe, 2–3 m vor dir, am besten leicht schräg (ca. 30–45°). Oberkörper und beide Arme müssen gut sichtbar sein. Gerade Schläge (Jab, Cross) werden am zuverlässigsten erkannt; Haken und Uppercuts nur, wenn der Arm dabei deutlich gestreckt wird.</p>
-      <p><b>Allgemein:</b> Gutes Licht, ruhiger Hintergrund, enge Kleidung hilft. Die Erkennung läuft komplett auf deinem Gerät – es wird kein Video hochgeladen. Beim ersten Start wird einmal das KI-Modell geladen (Internet nötig).</p>
+      <p><b>Push-ups:</b> Handy <b>quer</b> auf den Boden stellen (z. B. an eine Flasche gelehnt), <b>seitlich</b> von dir, ca. 1,5–2 m weg. Dein ganzer Körper von Kopf bis Füße muss im Bild sein. Von vorne geht auch, dann das Handy ca. 1,5 m vor deinen Kopf stellen, sodass Schultern und Hände gut zu sehen sind.</p>
+      <p><b>Boxen:</b> Handy auf Brust- bis Kopfhöhe, 2–3 m entfernt. Am besten <b>schräg von vorne (ca. 45°)</b>, nicht genau frontal. Kopf, Oberkörper und beide Hände müssen immer im Bild sein, auch wenn der Arm ausgestreckt ist.</p>
+      <p><b>Allgemein:</b> Helles Licht von vorne (nicht Gegenlicht vom Fenster), ruhiger Hintergrund, eher enge Kleidung. Die Erkennung läuft komplett auf deinem Handy, es wird kein Video hochgeladen.</p>
     </div>
   </details>
 </div>
@@ -154,37 +165,124 @@
 import { PoseLandmarker, FilesetResolver, DrawingUtils }
   from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
 
+// ===================== BEGIN-DETECTORS =====================
+// Reine Zähl-Logik ohne Kamera (so lässt sie sich auch testen).
+
+// Push-ups: zwei Signale, die App nimmt das mit der größeren Bewegung.
+//  A = Ellbogenwinkel in Grad (oben ~170, unten ~80)
+//  H = Schulterhöhe über der Hand / Armlänge (oben ~0.9, unten ~0.3)
+class PushCounter {
+  constructor() { this.reset(); }
+  reset() {
+    this.count = 0; this.bad = 0; this.state = "up";
+    this.A = null; this.H = null; this.hist = []; this.use = "H"; this.maxDepth = 0; this.depth = 0;
+  }
+  depthOf(sig, S) {   // 0 = ganz oben, 1 = ganz unten
+    return sig === "A"
+      ? (S.up - this.A) / (S.up - S.down)
+      : (S.hUp - this.H) / (S.hUp - S.hDown);
+  }
+  update(angle, h, t, S) {
+    if (angle != null) this.A = this.A == null ? angle : this.A * 0.5 + angle * 0.5;
+    if (h != null)     this.H = this.H == null ? h     : this.H * 0.5 + h * 0.5;
+    this.hist.push({ t, A: this.A, H: this.H });
+    while (this.hist.length && t - this.hist[0].t > 6000) this.hist.shift();
+
+    // Signal wählen: das, das sich in den letzten 6 s stärker bewegt hat
+    {
+      const amp = k => {
+        const v = this.hist.map(x => x[k]).filter(x => x != null);
+        return v.length ? Math.max(...v) - Math.min(...v) : 0;
+      };
+      const ampA = this.A == null ? 0 : amp("A") / (S.up - S.down);
+      const ampH = this.H == null ? 0 : amp("H") / (S.hUp - S.hDown);
+      let want = this.use;
+      if (this.H == null) want = "A";
+      else if (this.A == null) want = "H";
+      else if (ampA > ampH * 1.3 && ampA > 0.5) want = "A";
+      else if (ampH > ampA * 1.3 && ampH > 0.5) want = "H";
+      if (want !== this.use) { this.use = want; this.state = "up"; this.maxDepth = 0; }
+    }
+    if (this.use === "A" && this.A == null) return null;
+    if (this.use === "H" && this.H == null) return null;
+
+    const d = this.depthOf(this.use, S);
+    this.depth = d;
+    if (this.state === "up") {
+      if (d >= 1) { this.state = "down"; this.maxDepth = 0; return "down"; }
+      if (d <= 0) {
+        const partial = this.maxDepth >= 0.4;
+        this.maxDepth = 0;
+        if (partial) { this.bad++; return "partial"; }
+        return null;
+      }
+      this.maxDepth = Math.max(this.maxDepth, d);
+      return null;
+    }
+    if (d <= 0) { this.state = "up"; this.count++; this.maxDepth = 0; return "rep"; }
+    return null;
+  }
+}
+
+// Schläge (pro Arm): D = Abstand Kopf→Hand in Schulterbreiten.
+// Ein Schlag = D steigt innerhalb kurzer Zeit um mindestens "rise" an.
+class PunchArm {
+  constructor() { this.reset(); }
+  reset() { this.count = 0; this.armed = true; this.buf = []; this.peak = 0; this.firedAt = -1e9; this.sig = 0; }
+  update(D, t, S) {
+    this.buf.push({ t, D });
+    while (this.buf.length && t - this.buf[0].t > 450) this.buf.shift();
+    let base = Infinity;
+    for (const b of this.buf) base = Math.min(base, b.D);
+    this.sig = (D - base) / S.rise;
+    if (this.armed) {
+      if (D - base >= S.rise && t - this.firedAt > 160) {
+        this.armed = false; this.peak = D; this.firedAt = t; this.count++;
+        return "punch";
+      }
+    } else {
+      this.peak = Math.max(this.peak, D);
+      // wieder bereit, sobald die Hand deutlich zurückkommt (oder nach 1,2 s)
+      if ((this.peak - D >= S.rise * 0.35 && t - this.firedAt > 100) || t - this.firedAt > 1200) {
+        this.armed = true;
+        this.buf = [{ t, D }];   // Ausgangspunkt neu setzen → kein Doppelzählen beim Zurückziehen
+      }
+    }
+    return null;
+  }
+}
+// ===================== END-DETECTORS =====================
+
 const $ = id => document.getElementById(id);
 const video = $("video"), canvas = $("canvas"), ctx = canvas.getContext("2d");
 
-let landmarker = null, drawer = null, stream = null, running = false;
+let landmarker = null, fileset = null, drawer = null, stream = null, running = false, loadedModel = null;
 let facing = "user", mode = "pushup", lastVideoTime = -1, audio = null;
+let fpsCount = 0, fpsT = performance.now(), fps = 0, lastSeen = 0;
 
-const S = { down: 95, up: 160, out: 0.84, guard: 0.65, sound: true, voice: true };
+const S = { down: 105, up: 150, hDown: 0.55, hUp: 0.75, rise: 0.45, sound: true, voice: true, model: "full" };
 
-const push = { count: 0, bad: 0, state: "up", angle: null, minAngle: 180, record: 0 };
-const box = {
-  L: { count: 0, state: "guard", ext: null, last: 0 },
-  R: { count: 0, state: "guard", ext: null, last: 0 },
-  first: null,
-  round: { running: false, end: 0, startTotal: 0, timer: null }
-};
+const push = new PushCounter();
+let pushRecord = 0, armRef = null;
+const box = { L: new PunchArm(), R: new PunchArm(), first: null,
+  round: { running: false, end: 0, startTotal: 0, timer: null } };
 
-try { push.record = parseInt(localStorage.getItem("pushRecord") || "0", 10) || 0; } catch (e) {}
+try { pushRecord = parseInt(localStorage.getItem("pushRecord") || "0", 10) || 0; } catch (e) {}
 
-// ---------- Mathe-Helfer (3D-Weltkoordinaten in Metern) ----------
+// ---------- Geometrie ----------
 const sub = (a, b) => ({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z });
 const len = v => Math.hypot(v.x, v.y, v.z);
 const dist = (a, b) => len(sub(a, b));
-function angleDeg(a, b, c) {               // Winkel bei Punkt b
-  const u = sub(a, b), w = sub(c, b);
-  const d = (u.x * w.x + u.y * w.y + u.z * w.z) / ((len(u) * len(w)) || 1);
+const P = p => ({ x: p.x * canvas.width, y: p.y * canvas.height });       // Bildpixel
+const d2 = (a, b) => { const A = P(a), B = P(b); return Math.hypot(A.x - B.x, A.y - B.y); };
+function angle2D(a, b, c) {
+  const A = P(a), B = P(b), C = P(c);
+  const ux = A.x - B.x, uy = A.y - B.y, wx = C.x - B.x, wy = C.y - B.y;
+  const d = (ux * wx + uy * wy) / ((Math.hypot(ux, uy) * Math.hypot(wx, wy)) || 1);
   return Math.acos(Math.max(-1, Math.min(1, d))) * 180 / Math.PI;
 }
 const vis = (lm, ids) => Math.min(...ids.map(i => lm[i].visibility ?? 1));
-
-// MediaPipe-Indizes: 11/12 Schulter, 13/14 Ellbogen, 15/16 Handgelenk (L/R aus Sicht der Person)
-const ARMS = { L: [11, 13, 15], R: [12, 14, 16] };
+const ARMS = { L: [11, 13, 15], R: [12, 14, 16] };   // Schulter, Ellbogen, Handgelenk
 
 // ---------- Ton & Sprache ----------
 function beep(freq = 880, dur = 0.08, vol = 0.25) {
@@ -207,7 +305,6 @@ function say(text) {
     speechSynthesis.speak(u);
   } catch (e) {}
 }
-
 let fbTimer = null;
 function feedback(text, warn = false) {
   const el = $("feedback");
@@ -216,73 +313,58 @@ function feedback(text, warn = false) {
   clearTimeout(fbTimer);
   fbTimer = setTimeout(() => el.classList.remove("show"), 1100);
 }
-const setStatus = t => $("status").textContent = t;
+let statusText = "";
+const setStatus = t => { statusText = t; };
 
-// ---------- Push-up-Logik ----------
-function updatePush(lm, wl) {
-  let sum = 0, wsum = 0;
-  for (const ids of Object.values(ARMS)) {
-    const v = vis(lm, ids);
-    if (v > 0.5) { sum += angleDeg(wl[ids[0]], wl[ids[1]], wl[ids[2]]) * v; wsum += v; }
-  }
-  if (!wsum) { setStatus("Arme nicht gut sichtbar – Kamera seitlich aufstellen."); return; }
-  setStatus("Erkennung läuft …");
+// ---------- Push-ups ----------
+function updatePush(lm) {
+  // Arm mit der besten Sichtbarkeit (von der Seite ist ein Arm meist verdeckt)
+  let best = null, bestV = 0;
+  for (const k of ["L", "R"]) { const v = vis(lm, ARMS[k]); if (v > bestV) { bestV = v; best = k; } }
+  if (bestV < 0.3) { setStatus("Arme nicht gut sichtbar – ganzen Körper ins Bild, mehr Licht."); return; }
 
-  const a = sum / wsum;
-  push.angle = push.angle == null ? a : push.angle * 0.5 + a * 0.5;   // Glättung
-  const A = push.angle;
+  const [s, e, w] = ARMS[best];
+  const angle = angle2D(lm[s], lm[e], lm[w]);
 
-  if (push.state === "up") {
-    if (A < S.down) {
-      push.state = "down";
-      beep(520, 0.05, 0.15);
-    } else if (A > S.up) {
-      if (push.minAngle < S.up - 30) {          // war runter, aber nicht tief genug
-        push.bad++;
-        feedback("Tiefer runter! 👇", true);
-        beep(220, 0.18, 0.2);
-      }
-      push.minAngle = 180;
-    } else {
-      push.minAngle = Math.min(push.minAngle, A);
-    }
-  } else if (A > S.up) {                       // unten gewesen → oben angekommen = 1 Push-up
-    push.state = "up";
-    push.minAngle = 180;
-    push.count++;
+  // Schulterhöhe über dem Handgelenk, geteilt durch die (größte gesehene) Armlänge
+  const arm = d2(lm[s], lm[e]) + d2(lm[e], lm[w]);
+  armRef = armRef == null ? arm : Math.max(arm, armRef * 0.999);
+  const h = (P(lm[w]).y - P(lm[s]).y) / (armRef || 1);
+
+  setStatus(`Erkennung läuft · ${fps} FPS · Signal: ${push.use === "A" ? "Ellbogen" : "Schulterhöhe"}`);
+  const ev = push.update(angle, h, performance.now(), S);
+  if (ev === "down") beep(520, 0.05, 0.15);
+  else if (ev === "partial") { feedback("Tiefer runter! 👇", true); beep(220, 0.18, 0.2); }
+  else if (ev === "rep") {
     beep(880, 0.09);
     say(String(push.count));
     feedback(push.count % 10 === 0 ? `${push.count}! Stark! 🔥` : "Sauber! 💪");
-    if (push.count > push.record) {
-      push.record = push.count;
-      try { localStorage.setItem("pushRecord", String(push.record)); } catch (e) {}
+    if (push.count > pushRecord) {
+      pushRecord = push.count;
+      try { localStorage.setItem("pushRecord", String(pushRecord)); } catch (e) {}
     }
   }
 }
 
-// ---------- Box-Logik ----------
+// ---------- Boxen ----------
 function updateBox(lm, wl) {
-  let seen = 0;
   const now = performance.now();
+  const sw = Math.max(0.15, dist(wl[11], wl[12]));                // Schulterbreite (m)
+  const head = (lm[0].visibility ?? 1) > 0.3
+    ? wl[0]
+    : { x: (wl[11].x + wl[12].x) / 2, y: (wl[11].y + wl[12].y) / 2 - 0.25, z: (wl[11].z + wl[12].z) / 2 };
+  let seen = 0;
   for (const key of ["L", "R"]) {
-    const [s, e, w] = ARMS[key], arm = box[key];
-    if (vis(lm, [s, e, w]) < 0.4) continue;
+    const w = ARMS[key][2];
+    if ((lm[w].visibility ?? 1) < 0.15) continue;
     seen++;
-    // Streckung: Schulter→Hand geteilt durch Oberarm+Unterarm (1 = komplett gestreckt)
-    const ext = dist(wl[s], wl[w]) / ((dist(wl[s], wl[e]) + dist(wl[e], wl[w])) || 1);
-    arm.ext = arm.ext == null ? ext : arm.ext * 0.4 + ext * 0.6;
-
-    if (arm.state === "guard" && arm.ext > S.out && now - arm.last > 140) {
-      arm.state = "out";
-      arm.last = now;
-      arm.count++;
+    const D = dist(head, wl[w]) / sw;
+    if (box[key].update(D, now, S) === "punch") {
       if (!box.first) box.first = now;
       beep(key === "L" ? 620 : 900, 0.06);
-    } else if (arm.state === "out" && arm.ext < S.guard) {
-      arm.state = "guard";
     }
   }
-  setStatus(seen ? "Erkennung läuft …" : "Arme nicht sichtbar – weiter weg oder mehr Licht.");
+  setStatus(seen ? `Erkennung läuft · ${fps} FPS` : "Hände nicht sichtbar – weiter weg oder mehr Licht.");
 }
 
 // ---------- Zeichnen & Anzeige ----------
@@ -292,29 +374,29 @@ function drawPose(lm) {
   if (mode === "box") {
     for (const key of ["L", "R"]) {
       const p = lm[ARMS[key][2]];
+      const hot = performance.now() - box[key].firedAt < 250;
       ctx.beginPath();
-      ctx.arc(p.x * canvas.width, p.y * canvas.height, box[key].state === "out" ? 22 : 12, 0, Math.PI * 2);
-      ctx.fillStyle = key === "L" ? "rgba(56,189,248,.6)" : "rgba(249,115,22,.6)";
+      ctx.arc(p.x * canvas.width, p.y * canvas.height, hot ? 26 : 12, 0, Math.PI * 2);
+      ctx.fillStyle = key === "L" ? "rgba(56,189,248,.65)" : "rgba(249,115,22,.65)";
       ctx.fill();
     }
   }
 }
-
 function fmt(sec) { sec = Math.max(0, Math.ceil(sec)); return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`; }
 
 function render() {
+  $("status").textContent = statusText || "Bereit.";
   if (mode === "pushup") {
     $("bigCount").textContent = push.count;
     $("bigLabel").textContent = "Push-ups";
     $("pCount").textContent = push.count;
     $("pBad").textContent = push.bad;
-    $("pRecord").textContent = push.record;
-    $("pAngle").textContent = push.angle == null ? "–" : Math.round(push.angle) + "°";
-    // Tiefe: 0 % bei "oben", 100 % bei "unten"
-    const d = push.angle == null ? 0 : (S.up - push.angle) / (S.up - S.down);
-    const f = $("depthFill");
-    f.style.height = Math.max(0, Math.min(1, d)) * 100 + "%";
-    f.style.background = d >= 1 ? "var(--accent)" : "var(--warn)";
+    $("pRecord").textContent = pushRecord;
+    $("pAngle").textContent = push.A == null ? "–" : Math.round(push.A) + "°";
+    $("pHeight").textContent = push.H == null ? "–" : push.H.toFixed(2);
+    const d = Math.max(0, Math.min(1, push.depth || 0));
+    $("depthFill").style.height = d * 100 + "%";
+    $("depthFill").style.background = push.state === "down" ? "var(--accent)" : "var(--warn)";
   } else {
     const total = box.L.count + box.R.count;
     $("bigCount").textContent = total;
@@ -324,8 +406,8 @@ function render() {
     $("bRight").textContent = box.R.count;
     const mins = box.first ? (performance.now() - box.first) / 60000 : 0;
     $("bRate").textContent = mins > 0.1 ? Math.round(total / mins) : "–";
-    $("extL").style.width = ((box.L.ext ?? 0) * 100) + "%";
-    $("extR").style.width = ((box.R.ext ?? 0) * 100) + "%";
+    $("sigL").style.width = Math.max(0, Math.min(1, box.L.sig / 1.5)) * 100 + "%";
+    $("sigR").style.width = Math.max(0, Math.min(1, box.R.sig / 1.5)) * 100 + "%";
     const r = box.round;
     if (r.running) {
       $("bRound").textContent = fmt((r.end - Date.now()) / 1000);
@@ -334,30 +416,29 @@ function render() {
   }
 }
 
-function placeMarks() {
-  for (const k of ["L", "R"]) {
-    $("mP" + k).style.left = (S.out * 100) + "%";
-    $("mG" + k).style.left = (S.guard * 100) + "%";
-  }
-}
-
 // ---------- Hauptschleife ----------
 function loop() {
   if (!running) return;
-  if (video.readyState >= 2 && video.currentTime !== lastVideoTime) {
+  if (landmarker && video.readyState >= 2 && video.currentTime !== lastVideoTime) {
     lastVideoTime = video.currentTime;
-    if (canvas.width !== video.videoWidth) {
+    if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
       canvas.width = video.videoWidth; canvas.height = video.videoHeight;
       $("stage").style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
     }
-    const res = landmarker.detectForVideo(video, performance.now());
+    const now = performance.now();
+    fpsCount++;
+    if (now - fpsT > 1000) { fps = Math.round(fpsCount * 1000 / (now - fpsT)); fpsCount = 0; fpsT = now; }
+    const res = landmarker.detectForVideo(video, now);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (res.landmarks && res.landmarks.length && res.worldLandmarks && res.worldLandmarks.length) {
+      lastSeen = now;
       const lm = res.landmarks[0], wl = res.worldLandmarks[0];
       drawPose(lm);
-      if (mode === "pushup") updatePush(lm, wl); else updateBox(lm, wl);
-    } else {
-      setStatus("Keine Person erkannt – ganz ins Bild gehen.");
+      if (mode === "pushup") updatePush(lm); else updateBox(lm, wl);
+    } else if (now - lastSeen > 800) {
+      setStatus(mode === "pushup"
+        ? "Keine Person erkannt – Handy quer und weiter weg stellen, ganzer Körper ins Bild."
+        : "Keine Person erkannt – ganz ins Bild gehen.");
     }
   }
   render();
@@ -365,21 +446,26 @@ function loop() {
 }
 
 // ---------- Kamera & Modell ----------
+const MODEL_URL = m =>
+  `https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_${m}/float16/1/pose_landmarker_${m}.task`;
+
 async function initModel() {
-  setStatus("Lade KI-Modell … (nur beim ersten Mal etwas länger)");
-  const fileset = await FilesetResolver.forVisionTasks(
+  setStatus("Lade KI-Modell … (beim ersten Mal ein paar Sekunden)"); render();
+  if (!fileset) fileset = await FilesetResolver.forVisionTasks(
     "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
   const opts = delegate => ({
-    baseOptions: {
-      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
-      delegate
-    },
+    baseOptions: { modelAssetPath: MODEL_URL(S.model), delegate },
     runningMode: "VIDEO", numPoses: 1,
-    minPoseDetectionConfidence: 0.5, minPosePresenceConfidence: 0.5, minTrackingConfidence: 0.5
+    minPoseDetectionConfidence: 0.3, minPosePresenceConfidence: 0.3, minTrackingConfidence: 0.3
   });
-  try { landmarker = await PoseLandmarker.createFromOptions(fileset, opts("GPU")); }
-  catch (e) { landmarker = await PoseLandmarker.createFromOptions(fileset, opts("CPU")); }
+  const old = landmarker; landmarker = null;
+  try { old?.close(); } catch (e) {}
+  let lm;
+  try { lm = await PoseLandmarker.createFromOptions(fileset, opts("GPU")); }
+  catch (e) { lm = await PoseLandmarker.createFromOptions(fileset, opts("CPU")); }
+  landmarker = lm; loadedModel = S.model;
   drawer = new DrawingUtils(ctx);
+  lastVideoTime = -1;
 }
 
 let wakeLock = null;
@@ -389,38 +475,46 @@ async function start() {
     if (!audio) { try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
     if (audio && audio.state === "suspended") audio.resume();
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia)
-      throw new Error("Kein Kamerazugriff möglich. Öffne die Datei in Chrome oder Edge – oder über eine https-Adresse.");
-    if (!landmarker) await initModel();
-    setStatus("Starte Kamera …");
+      throw new Error("Kein Kamerazugriff möglich. Bitte die Seite über https öffnen.");
+    if (!landmarker || loadedModel !== S.model) await initModel();
+    setStatus("Starte Kamera …"); render();
     stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false
+      video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+      audio: false
     });
     video.srcObject = stream;
     await video.play();
     const m = facing === "user";
     video.classList.toggle("mirror", m); canvas.classList.toggle("mirror", m);
     $("placeholder").classList.add("hidden");
-    running = true; lastVideoTime = -1;
+    running = true; lastVideoTime = -1; lastSeen = performance.now();
     $("stopBtn").disabled = false;
     try { wakeLock = await navigator.wakeLock?.request("screen"); } catch (e) {}
     loop();
   } catch (e) {
     console.error(e);
-    setStatus("⚠️ " + (e.name === "NotAllowedError" ? "Kamerazugriff wurde abgelehnt – bitte im Browser erlauben." : e.message));
+    setStatus("⚠️ " + (e.name === "NotAllowedError"
+      ? "Kamerazugriff wurde abgelehnt – in den Browser-Einstellungen erlauben und neu laden."
+      : e.message));
+    render();
     $("startBtn").disabled = false;
   }
 }
-
 function stop() {
   running = false;
   if (stream) stream.getTracks().forEach(t => t.stop());
   stream = null;
   try { wakeLock?.release(); } catch (e) {}
   $("startBtn").disabled = false; $("stopBtn").disabled = true;
-  setStatus("Gestoppt.");
+  setStatus("Gestoppt."); render();
 }
 
 // ---------- Bedienung ----------
+function resetLive() {
+  const c = push.count, b = push.bad;
+  push.reset(); push.count = c; push.bad = b; armRef = null;
+  for (const k of ["L", "R"]) { const n = box[k].count; box[k].reset(); box[k].count = n; }
+}
 document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => {
   mode = t.dataset.mode;
   document.querySelectorAll(".tab").forEach(x => x.classList.toggle("active", x === t));
@@ -430,16 +524,14 @@ document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () =>
   $("depth").classList.toggle("hidden", !isPush);
   $("boxPanel").classList.toggle("hidden", isPush);
   $("boxSettings").classList.toggle("hidden", isPush);
-  push.state = "up"; push.angle = null; push.minAngle = 180;
-  for (const k of ["L", "R"]) { box[k].state = "guard"; box[k].ext = null; }
-  render();
+  resetLive(); render();
 }));
 
 $("startBtn").onclick = start;
 $("stopBtn").onclick = stop;
 $("resetBtn").onclick = () => {
-  if (mode === "pushup") { push.count = 0; push.bad = 0; push.state = "up"; push.minAngle = 180; }
-  else { box.L.count = 0; box.R.count = 0; box.first = null; box.round.startTotal = 0; }
+  if (mode === "pushup") { push.reset(); armRef = null; }
+  else { box.L.reset(); box.R.reset(); box.first = null; box.round.startTotal = 0; }
   render();
 };
 $("flipBtn").onclick = async () => {
@@ -449,6 +541,10 @@ $("flipBtn").onclick = async () => {
 $("soundBtn").onclick = () => {
   S.sound = !S.sound;
   $("soundBtn").textContent = S.sound ? "🔊 Ton an" : "🔇 Ton aus";
+};
+$("sModel").onchange = async e => {
+  S.model = e.target.value;
+  if (running) { try { await initModel(); setStatus("Modell gewechselt."); } catch (err) { setStatus("⚠️ " + err.message); } }
 };
 
 $("roundBtn").onclick = () => {
@@ -464,9 +560,10 @@ $("roundBtn").onclick = () => {
   r.end = Date.now() + parseInt($("roundLen").value, 10) * 1000;
   $("roundBtn").textContent = "⏹ Runde abbrechen";
   beep(1000, 0.4, 0.3);
+  let warned = false;
   r.timer = setInterval(() => {
     const left = (r.end - Date.now()) / 1000;
-    if (left <= 10 && left > 9) beep(700, 0.1);
+    if (left <= 10 && !warned) { warned = true; beep(700, 0.15); }
     if (left <= 0) {
       clearInterval(r.timer); r.running = false;
       const n = box.L.count + box.R.count - r.startTotal;
@@ -486,16 +583,16 @@ function bindSlider(id, out, key, suffix = "", dec = 0) {
   el.oninput = () => {
     S[key] = parseFloat(el.value);
     $(out).textContent = S[key].toFixed(dec) + suffix;
-    placeMarks(); render();
+    render();
   };
 }
 bindSlider("sDown", "oDown", "down", "°");
 bindSlider("sUp", "oUp", "up", "°");
-bindSlider("sOut", "oOut", "out", "", 2);
-bindSlider("sGuard", "oGuard", "guard", "", 2);
+bindSlider("sHDown", "oHDown", "hDown", "", 2);
+bindSlider("sHUp", "oHUp", "hUp", "", 2);
+bindSlider("sRise", "oRise", "rise", "", 2);
 $("sVoice").onchange = e => S.voice = e.target.checked;
 
-placeMarks();
 render();
 </script>
 </body>
