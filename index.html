@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KI-Trainer – Push-ups & Schläge zählen</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#171b22; --line:#2a303b; --text:#e9edf3; --muted:#9aa4b2;
+    --accent:#22c55e; --left:#38bdf8; --right:#f97316; --warn:#facc15;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--text);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  .wrap{max-width:1000px;margin:0 auto;padding:14px}
+  h1{font-size:1.25rem;margin:4px 0 12px;display:flex;gap:8px;align-items:center}
+  .tabs{display:flex;gap:8px;margin-bottom:12px}
+  .tab{flex:1;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--panel);
+    color:var(--text);font-size:1rem;font-weight:600;cursor:pointer}
+  .tab.active{background:var(--accent);border-color:var(--accent);color:#06240f}
+  .stage{position:relative;width:100%;background:#000;border-radius:16px;overflow:hidden;
+    aspect-ratio:16/9;border:1px solid var(--line)}
+  .stage video,.stage canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+  .mirror{transform:scaleX(-1)}
+  .placeholder{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    text-align:center;color:var(--muted);padding:20px;font-size:1rem;line-height:1.5}
+  .hud{position:absolute;top:10px;left:50%;transform:translateX(-50%);text-align:center;pointer-events:none}
+  .big{font-size:clamp(3rem,12vw,6.5rem);font-weight:800;line-height:1;
+    text-shadow:0 3px 14px rgba(0,0,0,.8)}
+  .biglabel{font-size:.95rem;color:#fff;opacity:.85;text-shadow:0 2px 6px #000}
+  .feedback{position:absolute;bottom:14px;left:50%;transform:translateX(-50%);
+    background:rgba(0,0,0,.65);padding:8px 16px;border-radius:999px;font-weight:700;
+    font-size:1.05rem;opacity:0;transition:opacity .25s;white-space:nowrap}
+  .feedback.show{opacity:1}
+  .feedback.warn{color:var(--warn)}
+  .depth{position:absolute;right:12px;top:12%;bottom:12%;width:18px;border-radius:9px;
+    background:rgba(255,255,255,.15);overflow:hidden}
+  .depth>div{position:absolute;bottom:0;left:0;right:0;background:var(--accent);transition:height .08s}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:12px 0}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+  .card .v{font-size:1.6rem;font-weight:800}
+  .card .k{font-size:.8rem;color:var(--muted)}
+  .bars{display:grid;gap:8px;margin:6px 0 12px}
+  .bar{display:flex;align-items:center;gap:8px;font-size:.85rem;color:var(--muted)}
+  .bar .track{position:relative;flex:1;height:14px;background:var(--panel);border:1px solid var(--line);
+    border-radius:7px;overflow:hidden}
+  .bar .fill{position:absolute;left:0;top:0;bottom:0;width:0}
+  .bar .mark{position:absolute;top:0;bottom:0;width:2px;background:#fff}
+  .bar .mark.g{background:var(--muted)}
+  .controls{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
+  button.btn{padding:12px 16px;border-radius:12px;border:1px solid var(--line);background:var(--panel);
+    color:var(--text);font-size:.95rem;font-weight:600;cursor:pointer}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#06240f}
+  button:disabled{opacity:.5}
+  .status{font-size:.9rem;color:var(--muted);min-height:1.3em;margin:6px 0}
+  details{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 14px;margin:10px 0}
+  summary{cursor:pointer;font-weight:600}
+  .row{display:flex;align-items:center;gap:10px;margin:10px 0;flex-wrap:wrap}
+  .row label{min-width:190px;font-size:.9rem}
+  .row input[type=range]{flex:1;min-width:150px}
+  .row output{min-width:44px;text-align:right;font-variant-numeric:tabular-nums}
+  .tips{font-size:.88rem;color:var(--muted);line-height:1.55}
+  .tips b{color:var(--text)}
+  select{background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:6px}
+  .hidden{display:none !important}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🥊 KI-Trainer <span style="font-weight:400;color:var(--muted);font-size:.9rem">Push-ups & Schläge zählen</span></h1>
+
+  <div class="tabs">
+    <button class="tab active" data-mode="pushup">💪 Push-ups</button>
+    <button class="tab" data-mode="box">🥊 Boxen</button>
+  </div>
+
+  <div class="stage" id="stage">
+    <video id="video" playsinline muted></video>
+    <canvas id="canvas"></canvas>
+    <div class="placeholder" id="placeholder">Tippe auf <b>&nbsp;„Kamera starten“&nbsp;</b> und erlaube den Kamerazugriff.</div>
+    <div class="hud"><div class="big" id="bigCount">0</div><div class="biglabel" id="bigLabel">Push-ups</div></div>
+    <div class="depth" id="depth"><div id="depthFill" style="height:0%"></div></div>
+    <div class="feedback" id="feedback"></div>
+  </div>
+
+  <div class="status" id="status">Bereit.</div>
+
+  <div class="controls">
+    <button class="btn primary" id="startBtn">▶ Kamera starten</button>
+    <button class="btn" id="stopBtn" disabled>⏸ Stopp</button>
+    <button class="btn" id="resetBtn">↺ Zurücksetzen</button>
+    <button class="btn" id="flipBtn">🔄 Kamera wechseln</button>
+    <button class="btn" id="soundBtn">🔊 Ton an</button>
+  </div>
+
+  <!-- Push-up Statistiken -->
+  <div id="pushPanel">
+    <div class="stats">
+      <div class="card"><div class="v" id="pCount">0</div><div class="k">Push-ups</div></div>
+      <div class="card"><div class="v" id="pAngle">–</div><div class="k">Ellbogenwinkel</div></div>
+      <div class="card"><div class="v" id="pBad">0</div><div class="k">zu flach (nicht gezählt)</div></div>
+      <div class="card"><div class="v" id="pRecord">0</div><div class="k">Rekord</div></div>
+    </div>
+  </div>
+
+  <!-- Box Statistiken -->
+  <div id="boxPanel" class="hidden">
+    <div class="stats">
+      <div class="card"><div class="v" id="bTotal">0</div><div class="k">Schläge gesamt</div></div>
+      <div class="card"><div class="v" style="color:var(--left)" id="bLeft">0</div><div class="k">linke Hand</div></div>
+      <div class="card"><div class="v" style="color:var(--right)" id="bRight">0</div><div class="k">rechte Hand</div></div>
+      <div class="card"><div class="v" id="bRate">–</div><div class="k">Schläge / Minute</div></div>
+      <div class="card"><div class="v" id="bRound">–</div><div class="k" id="bRoundLabel">Runde</div></div>
+    </div>
+    <div class="bars">
+      <div class="bar"><span style="width:62px;color:var(--left)">Links</span><div class="track"><div class="fill" id="extL" style="background:var(--left)"></div><div class="mark g" id="mGL"></div><div class="mark" id="mPL"></div></div></div>
+      <div class="bar"><span style="width:62px;color:var(--right)">Rechts</span><div class="track"><div class="fill" id="extR" style="background:var(--right)"></div><div class="mark g" id="mGR"></div><div class="mark" id="mPR"></div></div></div>
+    </div>
+    <div class="controls">
+      <select id="roundLen">
+        <option value="60">1:00 Runde</option>
+        <option value="120">2:00 Runde</option>
+        <option value="180" selected>3:00 Runde</option>
+      </select>
+      <button class="btn" id="roundBtn">⏱ Runde starten</button>
+    </div>
+  </div>
+
+  <details>
+    <summary>⚙️ Einstellungen (Empfindlichkeit)</summary>
+    <div id="pushSettings">
+      <div class="row"><label>Unten: Ellbogen kleiner als</label><input type="range" id="sDown" min="60" max="125" step="1" value="95"><output id="oDown">95°</output></div>
+      <div class="row"><label>Oben: Ellbogen größer als</label><input type="range" id="sUp" min="135" max="178" step="1" value="160"><output id="oUp">160°</output></div>
+      <div class="row"><label>Zahl laut ansagen</label><input type="checkbox" id="sVoice" checked></div>
+    </div>
+    <div id="boxSettings" class="hidden">
+      <div class="row"><label>Schlag zählt ab Armstreckung</label><input type="range" id="sOut" min="0.70" max="0.97" step="0.01" value="0.84"><output id="oOut">0.84</output></div>
+      <div class="row"><label>Zurück in Deckung unter</label><input type="range" id="sGuard" min="0.40" max="0.80" step="0.01" value="0.65"><output id="oGuard">0.65</output></div>
+      <div class="tips">Die Balken oben zeigen live, wie gestreckt dein Arm ist (0 = ganz gebeugt, 1 = ganz gestreckt). Weißer Strich = Schlag-Schwelle, grauer Strich = Deckungs-Schwelle. Wenn Schläge nicht gezählt werden: weißen Strich nach links schieben. Wenn zu viel gezählt wird: nach rechts.</div>
+    </div>
+  </details>
+
+  <details>
+    <summary>💡 So stellst du die Kamera auf</summary>
+    <div class="tips">
+      <p><b>Push-ups:</b> Handy/Laptop <b>seitlich</b> von dir auf den Boden stellen, ca. 2 m entfernt, sodass Kopf bis Füße im Bild sind. Gezählt wird, wenn dein Ellbogen unten unter den Winkel geht und oben wieder fast gestreckt ist. Halbe Wiederholungen werden <b>nicht</b> gezählt.</p>
+      <p><b>Boxen:</b> Kamera auf Brusthöhe, 2–3 m vor dir, am besten leicht schräg (ca. 30–45°). Oberkörper und beide Arme müssen gut sichtbar sein. Gerade Schläge (Jab, Cross) werden am zuverlässigsten erkannt; Haken und Uppercuts nur, wenn der Arm dabei deutlich gestreckt wird.</p>
+      <p><b>Allgemein:</b> Gutes Licht, ruhiger Hintergrund, enge Kleidung hilft. Die Erkennung läuft komplett auf deinem Gerät – es wird kein Video hochgeladen. Beim ersten Start wird einmal das KI-Modell geladen (Internet nötig).</p>
+    </div>
+  </details>
+</div>
+
+<script type="module">
+import { PoseLandmarker, FilesetResolver, DrawingUtils }
+  from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+
+const $ = id => document.getElementById(id);
+const video = $("video"), canvas = $("canvas"), ctx = canvas.getContext("2d");
+
+let landmarker = null, drawer = null, stream = null, running = false;
+let facing = "user", mode = "pushup", lastVideoTime = -1, audio = null;
+
+const S = { down: 95, up: 160, out: 0.84, guard: 0.65, sound: true, voice: true };
+
+const push = { count: 0, bad: 0, state: "up", angle: null, minAngle: 180, record: 0 };
+const box = {
+  L: { count: 0, state: "guard", ext: null, last: 0 },
+  R: { count: 0, state: "guard", ext: null, last: 0 },
+  first: null,
+  round: { running: false, end: 0, startTotal: 0, timer: null }
+};
+
+try { push.record = parseInt(localStorage.getItem("pushRecord") || "0", 10) || 0; } catch (e) {}
+
+// ---------- Mathe-Helfer (3D-Weltkoordinaten in Metern) ----------
+const sub = (a, b) => ({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z });
+const len = v => Math.hypot(v.x, v.y, v.z);
+const dist = (a, b) => len(sub(a, b));
+function angleDeg(a, b, c) {               // Winkel bei Punkt b
+  const u = sub(a, b), w = sub(c, b);
+  const d = (u.x * w.x + u.y * w.y + u.z * w.z) / ((len(u) * len(w)) || 1);
+  return Math.acos(Math.max(-1, Math.min(1, d))) * 180 / Math.PI;
+}
+const vis = (lm, ids) => Math.min(...ids.map(i => lm[i].visibility ?? 1));
+
+// MediaPipe-Indizes: 11/12 Schulter, 13/14 Ellbogen, 15/16 Handgelenk (L/R aus Sicht der Person)
+const ARMS = { L: [11, 13, 15], R: [12, 14, 16] };
+
+// ---------- Ton & Sprache ----------
+function beep(freq = 880, dur = 0.08, vol = 0.25) {
+  if (!S.sound || !audio) return;
+  try {
+    const o = audio.createOscillator(), g = audio.createGain();
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(vol, audio.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + dur);
+    o.connect(g).connect(audio.destination);
+    o.start(); o.stop(audio.currentTime + dur);
+  } catch (e) {}
+}
+function say(text) {
+  if (!S.sound || !S.voice || !("speechSynthesis" in window)) return;
+  try {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = "de-DE"; u.rate = 1.15;
+    speechSynthesis.speak(u);
+  } catch (e) {}
+}
+
+let fbTimer = null;
+function feedback(text, warn = false) {
+  const el = $("feedback");
+  el.textContent = text;
+  el.className = "feedback show" + (warn ? " warn" : "");
+  clearTimeout(fbTimer);
+  fbTimer = setTimeout(() => el.classList.remove("show"), 1100);
+}
+const setStatus = t => $("status").textContent = t;
+
+// ---------- Push-up-Logik ----------
+function updatePush(lm, wl) {
+  let sum = 0, wsum = 0;
+  for (const ids of Object.values(ARMS)) {
+    const v = vis(lm, ids);
+    if (v > 0.5) { sum += angleDeg(wl[ids[0]], wl[ids[1]], wl[ids[2]]) * v; wsum += v; }
+  }
+  if (!wsum) { setStatus("Arme nicht gut sichtbar – Kamera seitlich aufstellen."); return; }
+  setStatus("Erkennung läuft …");
+
+  const a = sum / wsum;
+  push.angle = push.angle == null ? a : push.angle * 0.5 + a * 0.5;   // Glättung
+  const A = push.angle;
+
+  if (push.state === "up") {
+    if (A < S.down) {
+      push.state = "down";
+      beep(520, 0.05, 0.15);
+    } else if (A > S.up) {
+      if (push.minAngle < S.up - 30) {          // war runter, aber nicht tief genug
+        push.bad++;
+        feedback("Tiefer runter! 👇", true);
+        beep(220, 0.18, 0.2);
+      }
+      push.minAngle = 180;
+    } else {
+      push.minAngle = Math.min(push.minAngle, A);
+    }
+  } else if (A > S.up) {                       // unten gewesen → oben angekommen = 1 Push-up
+    push.state = "up";
+    push.minAngle = 180;
+    push.count++;
+    beep(880, 0.09);
+    say(String(push.count));
+    feedback(push.count % 10 === 0 ? `${push.count}! Stark! 🔥` : "Sauber! 💪");
+    if (push.count > push.record) {
+      push.record = push.count;
+      try { localStorage.setItem("pushRecord", String(push.record)); } catch (e) {}
+    }
+  }
+}
+
+// ---------- Box-Logik ----------
+function updateBox(lm, wl) {
+  let seen = 0;
+  const now = performance.now();
+  for (const key of ["L", "R"]) {
+    const [s, e, w] = ARMS[key], arm = box[key];
+    if (vis(lm, [s, e, w]) < 0.4) continue;
+    seen++;
+    // Streckung: Schulter→Hand geteilt durch Oberarm+Unterarm (1 = komplett gestreckt)
+    const ext = dist(wl[s], wl[w]) / ((dist(wl[s], wl[e]) + dist(wl[e], wl[w])) || 1);
+    arm.ext = arm.ext == null ? ext : arm.ext * 0.4 + ext * 0.6;
+
+    if (arm.state === "guard" && arm.ext > S.out && now - arm.last > 140) {
+      arm.state = "out";
+      arm.last = now;
+      arm.count++;
+      if (!box.first) box.first = now;
+      beep(key === "L" ? 620 : 900, 0.06);
+    } else if (arm.state === "out" && arm.ext < S.guard) {
+      arm.state = "guard";
+    }
+  }
+  setStatus(seen ? "Erkennung läuft …" : "Arme nicht sichtbar – weiter weg oder mehr Licht.");
+}
+
+// ---------- Zeichnen & Anzeige ----------
+function drawPose(lm) {
+  drawer.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS, { color: "rgba(124,255,178,.85)", lineWidth: 3 });
+  drawer.drawLandmarks(lm, { radius: 3, color: "#ffffff", fillColor: "#16a34a", lineWidth: 1 });
+  if (mode === "box") {
+    for (const key of ["L", "R"]) {
+      const p = lm[ARMS[key][2]];
+      ctx.beginPath();
+      ctx.arc(p.x * canvas.width, p.y * canvas.height, box[key].state === "out" ? 22 : 12, 0, Math.PI * 2);
+      ctx.fillStyle = key === "L" ? "rgba(56,189,248,.6)" : "rgba(249,115,22,.6)";
+      ctx.fill();
+    }
+  }
+}
+
+function fmt(sec) { sec = Math.max(0, Math.ceil(sec)); return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`; }
+
+function render() {
+  if (mode === "pushup") {
+    $("bigCount").textContent = push.count;
+    $("bigLabel").textContent = "Push-ups";
+    $("pCount").textContent = push.count;
+    $("pBad").textContent = push.bad;
+    $("pRecord").textContent = push.record;
+    $("pAngle").textContent = push.angle == null ? "–" : Math.round(push.angle) + "°";
+    // Tiefe: 0 % bei "oben", 100 % bei "unten"
+    const d = push.angle == null ? 0 : (S.up - push.angle) / (S.up - S.down);
+    const f = $("depthFill");
+    f.style.height = Math.max(0, Math.min(1, d)) * 100 + "%";
+    f.style.background = d >= 1 ? "var(--accent)" : "var(--warn)";
+  } else {
+    const total = box.L.count + box.R.count;
+    $("bigCount").textContent = total;
+    $("bigLabel").textContent = "Schläge";
+    $("bTotal").textContent = total;
+    $("bLeft").textContent = box.L.count;
+    $("bRight").textContent = box.R.count;
+    const mins = box.first ? (performance.now() - box.first) / 60000 : 0;
+    $("bRate").textContent = mins > 0.1 ? Math.round(total / mins) : "–";
+    $("extL").style.width = ((box.L.ext ?? 0) * 100) + "%";
+    $("extR").style.width = ((box.R.ext ?? 0) * 100) + "%";
+    const r = box.round;
+    if (r.running) {
+      $("bRound").textContent = fmt((r.end - Date.now()) / 1000);
+      $("bRoundLabel").textContent = `Runde · ${total - r.startTotal} Schläge`;
+    }
+  }
+}
+
+function placeMarks() {
+  for (const k of ["L", "R"]) {
+    $("mP" + k).style.left = (S.out * 100) + "%";
+    $("mG" + k).style.left = (S.guard * 100) + "%";
+  }
+}
+
+// ---------- Hauptschleife ----------
+function loop() {
+  if (!running) return;
+  if (video.readyState >= 2 && video.currentTime !== lastVideoTime) {
+    lastVideoTime = video.currentTime;
+    if (canvas.width !== video.videoWidth) {
+      canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+      $("stage").style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
+    }
+    const res = landmarker.detectForVideo(video, performance.now());
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (res.landmarks && res.landmarks.length && res.worldLandmarks && res.worldLandmarks.length) {
+      const lm = res.landmarks[0], wl = res.worldLandmarks[0];
+      drawPose(lm);
+      if (mode === "pushup") updatePush(lm, wl); else updateBox(lm, wl);
+    } else {
+      setStatus("Keine Person erkannt – ganz ins Bild gehen.");
+    }
+  }
+  render();
+  requestAnimationFrame(loop);
+}
+
+// ---------- Kamera & Modell ----------
+async function initModel() {
+  setStatus("Lade KI-Modell … (nur beim ersten Mal etwas länger)");
+  const fileset = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+  const opts = delegate => ({
+    baseOptions: {
+      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+      delegate
+    },
+    runningMode: "VIDEO", numPoses: 1,
+    minPoseDetectionConfidence: 0.5, minPosePresenceConfidence: 0.5, minTrackingConfidence: 0.5
+  });
+  try { landmarker = await PoseLandmarker.createFromOptions(fileset, opts("GPU")); }
+  catch (e) { landmarker = await PoseLandmarker.createFromOptions(fileset, opts("CPU")); }
+  drawer = new DrawingUtils(ctx);
+}
+
+let wakeLock = null;
+async function start() {
+  $("startBtn").disabled = true;
+  try {
+    if (!audio) { try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    if (audio && audio.state === "suspended") audio.resume();
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia)
+      throw new Error("Kein Kamerazugriff möglich. Öffne die Datei in Chrome oder Edge – oder über eine https-Adresse.");
+    if (!landmarker) await initModel();
+    setStatus("Starte Kamera …");
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false
+    });
+    video.srcObject = stream;
+    await video.play();
+    const m = facing === "user";
+    video.classList.toggle("mirror", m); canvas.classList.toggle("mirror", m);
+    $("placeholder").classList.add("hidden");
+    running = true; lastVideoTime = -1;
+    $("stopBtn").disabled = false;
+    try { wakeLock = await navigator.wakeLock?.request("screen"); } catch (e) {}
+    loop();
+  } catch (e) {
+    console.error(e);
+    setStatus("⚠️ " + (e.name === "NotAllowedError" ? "Kamerazugriff wurde abgelehnt – bitte im Browser erlauben." : e.message));
+    $("startBtn").disabled = false;
+  }
+}
+
+function stop() {
+  running = false;
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  stream = null;
+  try { wakeLock?.release(); } catch (e) {}
+  $("startBtn").disabled = false; $("stopBtn").disabled = true;
+  setStatus("Gestoppt.");
+}
+
+// ---------- Bedienung ----------
+document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => {
+  mode = t.dataset.mode;
+  document.querySelectorAll(".tab").forEach(x => x.classList.toggle("active", x === t));
+  const isPush = mode === "pushup";
+  $("pushPanel").classList.toggle("hidden", !isPush);
+  $("pushSettings").classList.toggle("hidden", !isPush);
+  $("depth").classList.toggle("hidden", !isPush);
+  $("boxPanel").classList.toggle("hidden", isPush);
+  $("boxSettings").classList.toggle("hidden", isPush);
+  push.state = "up"; push.angle = null; push.minAngle = 180;
+  for (const k of ["L", "R"]) { box[k].state = "guard"; box[k].ext = null; }
+  render();
+}));
+
+$("startBtn").onclick = start;
+$("stopBtn").onclick = stop;
+$("resetBtn").onclick = () => {
+  if (mode === "pushup") { push.count = 0; push.bad = 0; push.state = "up"; push.minAngle = 180; }
+  else { box.L.count = 0; box.R.count = 0; box.first = null; box.round.startTotal = 0; }
+  render();
+};
+$("flipBtn").onclick = async () => {
+  facing = facing === "user" ? "environment" : "user";
+  if (running) { stop(); await start(); }
+};
+$("soundBtn").onclick = () => {
+  S.sound = !S.sound;
+  $("soundBtn").textContent = S.sound ? "🔊 Ton an" : "🔇 Ton aus";
+};
+
+$("roundBtn").onclick = () => {
+  const r = box.round;
+  if (r.running) {
+    r.running = false; clearInterval(r.timer);
+    $("roundBtn").textContent = "⏱ Runde starten";
+    $("bRound").textContent = "–"; $("bRoundLabel").textContent = "Runde";
+    return;
+  }
+  r.running = true;
+  r.startTotal = box.L.count + box.R.count;
+  r.end = Date.now() + parseInt($("roundLen").value, 10) * 1000;
+  $("roundBtn").textContent = "⏹ Runde abbrechen";
+  beep(1000, 0.4, 0.3);
+  r.timer = setInterval(() => {
+    const left = (r.end - Date.now()) / 1000;
+    if (left <= 10 && left > 9) beep(700, 0.1);
+    if (left <= 0) {
+      clearInterval(r.timer); r.running = false;
+      const n = box.L.count + box.R.count - r.startTotal;
+      beep(1000, 0.25, 0.3); setTimeout(() => beep(1000, 0.25, 0.3), 350); setTimeout(() => beep(1000, 0.5, 0.3), 700);
+      $("bRound").textContent = n;
+      $("bRoundLabel").textContent = "Schläge letzte Runde";
+      $("roundBtn").textContent = "⏱ Runde starten";
+      feedback(`Runde vorbei: ${n} Schläge 🥊`);
+      say(`Runde vorbei. ${n} Schläge.`);
+    }
+    render();
+  }, 250);
+};
+
+function bindSlider(id, out, key, suffix = "", dec = 0) {
+  const el = $(id);
+  el.oninput = () => {
+    S[key] = parseFloat(el.value);
+    $(out).textContent = S[key].toFixed(dec) + suffix;
+    placeMarks(); render();
+  };
+}
+bindSlider("sDown", "oDown", "down", "°");
+bindSlider("sUp", "oUp", "up", "°");
+bindSlider("sOut", "oOut", "out", "", 2);
+bindSlider("sGuard", "oGuard", "guard", "", 2);
+$("sVoice").onchange = e => S.voice = e.target.checked;
+
+placeMarks();
+render();
+</script>
+</body>
+</html>
