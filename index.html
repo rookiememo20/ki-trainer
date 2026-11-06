@@ -35,6 +35,11 @@
     font-size:1.05rem;opacity:0;transition:opacity .25s;white-space:nowrap}
   .feedback.show{opacity:1}
   .feedback.warn{color:var(--warn)}
+  .countdown{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    background:rgba(0,0,0,.45);pointer-events:none}
+  .countdown .n{font-size:clamp(5rem,25vw,12rem);font-weight:900;line-height:1;color:var(--warn);
+    text-shadow:0 4px 20px rgba(0,0,0,.9)}
+  .countdown .t{font-size:1.1rem;font-weight:700;color:#fff;text-shadow:0 2px 8px #000;margin-top:8px}
   .depth{position:absolute;right:12px;top:12%;bottom:12%;width:18px;border-radius:9px;
     background:rgba(255,255,255,.15);overflow:hidden}
   .depth>div{position:absolute;top:0;left:0;right:0;background:var(--warn);transition:height .08s}
@@ -68,7 +73,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>🥊 KI-Trainer <span class="ver">v5 · Push-ups & Schläge zählen</span></h1>
+  <h1>🥊 KI-Trainer <span class="ver">v6 · Push-ups & Schläge zählen</span></h1>
 
   <div class="tabs">
     <button class="tab active" data-mode="pushup">💪 Push-ups</button>
@@ -82,6 +87,7 @@
     <div class="hud"><div class="big" id="bigCount">0</div><div class="biglabel" id="bigLabel">Push-ups</div></div>
     <div class="depth" id="depth"><div id="depthFill" style="height:0%"></div></div>
     <div class="feedback" id="feedback"></div>
+    <div class="countdown hidden" id="countdown"><div class="n" id="cdNum">5</div><div class="t">Geh in Position – gleich wird gezählt</div></div>
   </div>
 
   <div class="status" id="status">Bereit.</div>
@@ -90,6 +96,7 @@
     <button class="btn primary" id="startBtn">▶ Kamera starten</button>
     <button class="btn" id="stopBtn" disabled>⏸ Stopp</button>
     <button class="btn" id="resetBtn">↺ Zurücksetzen</button>
+    <button class="btn" id="cdBtn">⏳ Countdown</button>
     <button class="btn" id="flipBtn">🔄 Kamera wechseln</button>
     <button class="btn" id="soundBtn">🔊 Ton an</button>
   </div>
@@ -135,6 +142,15 @@
 
   <details>
     <summary>⚙️ Einstellungen</summary>
+    <div class="row"><label>Countdown vor dem Zählen</label>
+      <select id="sCd">
+        <option value="0">Aus</option>
+        <option value="3">3 Sekunden</option>
+        <option value="5" selected>5 Sekunden</option>
+        <option value="10">10 Sekunden</option>
+      </select>
+    </div>
+    <div class="tips" style="margin-top:-4px">Startet automatisch bei „Kamera starten“, „Zurücksetzen“ und „Runde starten“ – oder jederzeit mit „⏳ Countdown“. Während er läuft, wird nichts gezählt.</div>
     <div class="row"><label>KI-Modell</label>
       <select id="sModel">
         <option value="full" selected>Genau (empfohlen)</option>
@@ -367,6 +383,38 @@ function say(text) {
     speechSynthesis.speak(u);
   } catch (e) {}
 }
+// ---------- Countdown ----------
+let cdEnd = 0, cdLast = null;
+function startCountdown() {
+  const secs = parseInt($("sCd").value, 10) || 0;
+  if (!secs) { cdEnd = 0; return 0; }
+  cdEnd = performance.now() + secs * 1000;
+  cdLast = null;
+  $("countdown").classList.remove("hidden");
+  return secs * 1000;
+}
+// true = gerade läuft der Countdown (nicht zählen)
+function countdownActive(now) {
+  if (!cdEnd) return false;
+  if (now < cdEnd) {
+    const n = Math.ceil((cdEnd - now) / 1000);
+    if (n !== cdLast) {
+      cdLast = n;
+      $("cdNum").textContent = n;
+      beep(n <= 3 ? 700 : 500, 0.08, 0.2);
+      if (n <= 3) say(String(n));
+    }
+    return true;
+  }
+  // Countdown vorbei → Erkennung frisch starten (Zählerstände bleiben)
+  cdEnd = 0;
+  $("countdown").classList.add("hidden");
+  resetLive();
+  beep(1000, 0.35, 0.3);
+  feedback("Los! 🥊");
+  return false;
+}
+
 let fbTimer = null;
 function feedback(text, warn = false) {
   const el = $("feedback");
@@ -481,7 +529,7 @@ function render() {
     }
     const r = box.round;
     if (r.running) {
-      $("bRound").textContent = fmt((r.end - Date.now()) / 1000);
+      $("bRound").textContent = fmt(Math.min((r.end - Date.now()) / 1000, r.len));
       $("bRoundLabel").textContent = `Runde · ${total - r.startTotal} Schläge`;
     }
   }
@@ -500,12 +548,14 @@ function loop() {
     fpsCount++;
     if (now - fpsT > 1000) { fps = Math.round(fpsCount * 1000 / (now - fpsT)); fpsCount = 0; fpsT = now; }
     const res = landmarker.detectForVideo(video, now);
+    if (cdEnd && !(res.landmarks && res.landmarks.length)) countdownActive(now);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (res.landmarks && res.landmarks.length && res.worldLandmarks && res.worldLandmarks.length) {
       lastSeen = now;
       const lm = res.landmarks[0], wl = res.worldLandmarks[0];
       drawPose(lm);
-      if (mode === "pushup") updatePush(lm); else updateBox(lm, wl);
+      if (countdownActive(now)) setStatus("Countdown läuft – noch wird nicht gezählt.");
+      else if (mode === "pushup") updatePush(lm); else updateBox(lm, wl);
     } else if (now - lastSeen > 800) {
       setStatus(mode === "pushup"
         ? "Keine Person erkannt – Handy quer und weiter weg stellen, ganzer Körper ins Bild."
@@ -561,6 +611,7 @@ async function start() {
     running = true; lastVideoTime = -1; lastSeen = performance.now();
     $("stopBtn").disabled = false;
     try { wakeLock = await navigator.wakeLock?.request("screen"); } catch (e) {}
+    startCountdown();
     loop();
   } catch (e) {
     console.error(e);
@@ -577,6 +628,7 @@ function stop() {
   stream = null;
   try { wakeLock?.release(); } catch (e) {}
   $("startBtn").disabled = false; $("stopBtn").disabled = true;
+  cdEnd = 0; $("countdown").classList.add("hidden");
   setStatus("Gestoppt."); render();
 }
 
@@ -603,7 +655,12 @@ $("stopBtn").onclick = stop;
 $("resetBtn").onclick = () => {
   if (mode === "pushup") { push.reset(); armRef = null; }
   else { box.reset(); box.round.startTotal = 0; }
+  if (running) startCountdown();
   render();
+};
+$("cdBtn").onclick = () => {
+  if (!audio) { try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+  if (running) startCountdown(); else feedback("Erst die Kamera starten", true);
 };
 $("flipBtn").onclick = async () => {
   facing = facing === "user" ? "environment" : "user";
@@ -628,9 +685,11 @@ $("roundBtn").onclick = () => {
   }
   r.running = true;
   r.startTotal = box.L.count + box.R.count;
-  r.end = Date.now() + parseInt($("roundLen").value, 10) * 1000;
+  const cdMs = running ? startCountdown() : 0;
+  r.len = parseInt($("roundLen").value, 10);
+  r.end = Date.now() + cdMs + r.len * 1000;
   $("roundBtn").textContent = "⏹ Runde abbrechen";
-  beep(1000, 0.4, 0.3);
+  if (!cdMs) beep(1000, 0.4, 0.3);
   let warned = false;
   r.timer = setInterval(() => {
     const left = (r.end - Date.now()) / 1000;
