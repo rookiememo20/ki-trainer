@@ -68,7 +68,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>🥊 KI-Trainer <span class="ver">v3 · Push-ups & Schläge zählen</span></h1>
+  <h1>🥊 KI-Trainer <span class="ver">v4 ·Push-ups & Schläge zählen</span></h1>
 
   <div class="tabs">
     <button class="tab active" data-mode="pushup">💪 Push-ups</button>
@@ -146,8 +146,10 @@
       <div class="tips">Die App misst zwei Dinge: den Ellbogenwinkel und wie hoch deine Schultern über den Händen sind. Sie nimmt automatisch das Signal, das sich bei dir stärker bewegt. Der gelbe Balken rechts im Bild zeigt die Tiefe: ganz voll = unten erkannt.</div>
     </div>
     <div id="boxSettings" class="hidden">
-      <div class="row"><label>Empfindlichkeit (weniger = empfindlicher)</label><input type="range" id="sRise" min="0.20" max="1.20" step="0.01" value="0.45"><output id="oRise">0.45</output></div>
-      <div class="tips">Die Balken zeigen live, wie schnell und weit deine Hand von deinem Kopf weg schießt. Erreicht ein Balken den weißen Strich, zählt ein Schlag. Werden Schläge nicht gezählt: Wert kleiner machen. Wird zu viel gezählt (z. B. beim Hin- und Herbewegen): Wert größer machen.</div>
+      <div class="row"><label>Schlagweite (weniger = empfindlicher)</label><input type="range" id="sRise" min="0.20" max="1.20" step="0.01" value="0.50"><output id="oRise">0.50</output></div>
+      <div class="row"><label>Mindest-Armstreckung (weniger = empfindlicher)</label><input type="range" id="sMinExt" min="0.45" max="0.95" step="0.01" value="0.62"><output id="oMinExt">0.62</output></div>
+      <div class="tips">Ein Schlag zählt nur, wenn <b>beides</b> erfüllt ist: Die Hand schießt schnell weit genug nach vorne (<b>Schlagweite</b>) und der Arm ist dabei gestreckt genug (<b>Armstreckung</b>, 1 = ganz gestreckt, Deckung ≈ 0,4). Die Balken zeigen live, wie nah du dran bist. Erreicht ein Balken den weißen Strich, zählt der Schlag.<br>
+      <b>Zählt bei kleinen Bewegungen:</b> beide Werte größer machen. <b>Haken/Schläge fehlen:</b> Armstreckung kleiner machen (Haken ≈ 0,65–0,75).</div>
     </div>
   </details>
 
@@ -224,21 +226,31 @@ class PushCounter {
   }
 }
 
-// Schläge (pro Arm): D = Abstand Kopf→Hand in Schulterbreiten.
-// Ein Schlag = D steigt innerhalb kurzer Zeit um mindestens "rise" an.
+// Schläge (pro Arm): D = Abstand Kopf/Schulter→Hand in Schulterbreiten, ext = Armstreckung (0..1).
+// Ein Schlag = D steigt schnell um mindestens "rise" an UND der Arm ist dabei wirklich gestreckt.
+const median3 = a => a.length < 3 ? a[a.length - 1] : [...a].sort((x, y) => x - y)[1];
 class PunchArm {
   constructor() { this.reset(); }
-  reset() { this.count = 0; this.armed = true; this.buf = []; this.peak = 0; this.firedAt = -1e9; this.sig = 0; }
-  update(D, t, S) {
+  reset() {
+    this.count = 0; this.armed = true; this.buf = []; this.peak = 0; this.firedAt = -1e9;
+    this.sig = 0; this.rawD = []; this.rawE = []; this.ext = 0;
+  }
+  update(Draw, extRaw, t, S) {
     // Hand war kurz verdeckt → alten Verlauf verwerfen (sonst zählt der "Sprung" beim Wiederauftauchen)
-    if (this.buf.length && t - this.buf[this.buf.length - 1].t > 250) this.buf = [];
+    if (this.buf.length && t - this.buf[this.buf.length - 1].t > 250) { this.buf = []; this.rawD = []; this.rawE = []; }
+    // Median aus 3 Bildern: einzelne Ausreißer der KI (Zittern der Hand) fallen weg
+    this.rawD.push(Draw); if (this.rawD.length > 3) this.rawD.shift();
+    this.rawE.push(extRaw); if (this.rawE.length > 4) this.rawE.shift();
+    const D = median3(this.rawD);
+    // Streckung: zweithöchster Wert der letzten 4 Bilder → kurze echte Streckung zählt, ein einzelner Ausreißer nicht
+    const ext = this.ext = this.rawE.length < 2 ? 0 : [...this.rawE].sort((x, y) => y - x)[1];
     this.buf.push({ t, D });
     while (this.buf.length && t - this.buf[0].t > 450) this.buf.shift();
     let base = Infinity;
     for (const b of this.buf) base = Math.min(base, b.D);
-    this.sig = (D - base) / S.rise;
+    this.sig = Math.min((D - base) / S.rise, ext / S.minExt);
     if (this.armed) {
-      if (D - base >= S.rise && t - this.firedAt > 160) {
+      if (D - base >= S.rise && ext >= S.minExt && t - this.firedAt > 160) {
         this.armed = false; this.peak = D; this.firedAt = t; this.count++;
         return "punch";
       }
@@ -279,7 +291,7 @@ class PunchCounter {
       const s = sides[k];
       if (!s) continue;
       const D = (s.dHead + s.dSh) / 2 / this.swRef;
-      if (this[k].update(D, t, S) === "punch") {
+      if (this[k].update(D, s.ext, t, S) === "punch") {
         const other = this[k === "L" ? "R" : "L"];
         if (t - other.firedAt < 150) { this[k].count--; continue; }  // gleicher Schlag, Seiten vertauscht
         if (!this.first) this.first = t;
@@ -298,7 +310,7 @@ let landmarker = null, fileset = null, drawer = null, stream = null, running = f
 let facing = "user", mode = "pushup", lastVideoTime = -1, audio = null;
 let fpsCount = 0, fpsT = performance.now(), fps = 0, lastSeen = 0;
 
-const S = { down: 105, up: 150, hDown: 0.55, hUp: 0.75, rise: 0.45, sound: true, voice: true, model: "full" };
+const S = { down: 105, up: 150, hDown: 0.55, hUp: 0.75, rise: 0.5, minExt: 0.62, sound: true, voice: true, model: "full" };
 
 const push = new PushCounter();
 let pushRecord = 0, armRef = null;
@@ -397,7 +409,9 @@ function updateBox(lm, wl) {
     const [s, , w] = ARMS[key];
     if ((lm[w].visibility ?? 1) < 0.2) continue;
     seen++;
-    sides[key] = { dHead: dist(head, wl[w]), dSh: dist(wl[s], wl[w]), pos: { x: lm[w].x, y: lm[w].y } };
+    const e = ARMS[key][1];
+    const ext = dist(wl[s], wl[w]) / ((dist(wl[s], wl[e]) + dist(wl[e], wl[w])) || 1);   // 1 = Arm ganz gestreckt
+    sides[key] = { dHead: dist(head, wl[w]), dSh: dist(wl[s], wl[w]), ext, pos: { x: lm[w].x, y: lm[w].y } };
   }
   for (const key of box.update(sw, sides, now, S)) beep(key === "L" ? 620 : 900, 0.06);
   setStatus(seen ? `Erkennung läuft · ${fps} FPS` : "Hände nicht sichtbar – weiter weg oder mehr Licht.");
@@ -627,6 +641,7 @@ bindSlider("sUp", "oUp", "up", "°");
 bindSlider("sHDown", "oHDown", "hDown", "", 2);
 bindSlider("sHUp", "oHUp", "hUp", "", 2);
 bindSlider("sRise", "oRise", "rise", "", 2);
+bindSlider("sMinExt", "oMinExt", "minExt", "", 2);
 $("sVoice").onchange = e => S.voice = e.target.checked;
 
 render();
