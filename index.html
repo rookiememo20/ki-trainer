@@ -155,7 +155,7 @@
 <div class="wrap">
   <div class="top">
     <h1><span class="logo">🥊</span> KI-Trainer</h1>
-    <span class="ver">v9.7</span>
+    <span class="ver">v9.8</span>
   </div>
 
   <div class="tabs">
@@ -277,6 +277,15 @@
         </div>
 
         <div class="section">
+          <h3>📍 Richtig hinstellen</h3>
+          <div class="tips">Die App sagt dir laut, wie du Handy und dich hinstellen sollst: Abstand, Mitte, ganz im Bild und der richtige Winkel. Stell dich dafür in deine Auslage, Hände in die Deckung.</div>
+          <div class="controls">
+            <button class="btn primary" id="placeBtn">📍 Richtig hinstellen</button>
+          </div>
+          <div class="hint" id="placeInfo">Am besten vor dem Kalibrieren.</div>
+        </div>
+
+        <div class="section">
           <h3>🎯 Kalibrierung</h3>
           <div class="tips" id="calInfo">Noch nicht kalibriert. Die App nutzt allgemeine Regeln.</div>
           <div class="hint">Ca. 1 Minute: je 3× Jab, Cross, beide Haken und beide Uppercuts – einzeln, in deinem normalen Tempo. Nach dem Umstellen der Kamera neu kalibrieren.</div>
@@ -341,7 +350,7 @@
         <summary>💡 So stellst du die Kamera auf</summary>
         <div class="tips">
           <p><b>Push-ups:</b> Handy <b>quer</b> auf den Boden, <b>seitlich</b> von dir, ca. 1,5–2 m weg. Der ganze Körper muss im Bild sein.</p>
-          <p><b>Boxen:</b> Handy auf Bauch- bis Kopfhöhe, 2–3 m entfernt. Stell dich in deine Auslage und dreh dich so, dass die Kamera <b>deine Brust</b> und <b>beide Fäuste</b> sieht (bei Orthodox steht die Kamera eher rechts vor dir). <b>Nicht im Profil</b> zur Kamera stehen. Kopf, Oberkörper, Hüfte und beide Fäuste müssen immer im Bild sein. Danach einmal <b>🎯 Kalibrieren</b>.</p>
+          <p><b>Boxen:</b> Handy auf Bauch- bis Kopfhöhe, 2–3 m entfernt. Stell dich in deine Auslage. Das Handy steht <b>schräg auf der Seite deiner Führhand</b> (Orthodox: links vor dir, Southpaw: rechts vor dir), so sieht die Kamera die Führhand auch beim Cross. Tipp: <b>📍 Richtig hinstellen</b> sagt dir genau, wann es passt. <b>Nicht im Profil</b> zur Kamera stehen. Kopf, Oberkörper, Hüfte und beide Fäuste müssen immer im Bild sein. Danach einmal <b>🎯 Kalibrieren</b>.</p>
           <p><b>Allgemein:</b> Helles Licht von vorne, ruhiger Hintergrund. Die Erkennung läuft komplett auf deinem Gerät – es wird kein Video hochgeladen.</p>
         </div>
       </details>
@@ -350,7 +359,7 @@
 </div>
 
 <script type="module">
-const APP_VER = "v9.7";
+const APP_VER = "v9.8";
 import { PoseLandmarker, FilesetResolver, DrawingUtils }
   from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
 
@@ -1101,6 +1110,7 @@ function recFrame(now, lm, wl, cd) {
   else { $("recBtn").textContent = `⏹ Aufnahme abbrechen`; $("recBtn2").textContent = `⏹ Aufnahme abbrechen`; }
 }
 function startRec(kind) {
+  if (place.active) stopPlace(false);
   if (!running) { feedback("Erst die Kamera starten", true); return; }
   if (mode !== "box") { feedback("Erst auf „Boxen“ wechseln", true); return; }
   if (calibState) stopCalibration(true);
@@ -1233,6 +1243,99 @@ function checkPosition(ex, now) {
   else el.classList.add("hidden");
   return warn;
 }
+// ---------- Richtig hinstellen (Ansagen für Abstand, Mitte, Bildausschnitt und Winkel) ----------
+// Winkel: Wie viel näher ist die Schulter der Führhand an der Kamera als die hintere (Grad).
+// Ziel: Führ-Schulter etwas näher (Handy schräg auf der Seite der Führhand) → der Cross verdeckt die Führhand nicht.
+const PLACE_ANG = { min: 5, max: 40, ideal: "15–35" };
+const place = { active: false, hist: [], okSince: null, say: "", sayT: 0, doneT: 0 };
+function startPlace() {
+  if (!running) { feedback("Erst die Kamera starten", true); return; }
+  if (mode !== "box") { feedback("Erst auf „Boxen“ wechseln", true); return; }
+  if (place.active) { stopPlace(false); return; }
+  if (calibState) stopCalibration(true);
+  if (combo.active) stopCombo();
+  if (rec) stopRec();
+  if (!S.sound) { S.sound = true; $("soundBtn").textContent = "🔊 Ton an"; }
+  Object.assign(place, { active: true, hist: [], okSince: null, say: "", sayT: performance.now() + 2500, doneT: 0, cur: null, cand: null });
+  speak("Ich helfe dir beim Hinstellen. Stell dich in deine Auslage, Hände in die Deckung.");
+  coach("📍 Hinstellen", "Auslage, Hände in die Deckung – hör auf die Ansagen");
+  $("placeBtn").textContent = "⏹ Hinstellen beenden";
+}
+function stopPlace(done) {
+  place.active = false;
+  $("placeBtn").textContent = "📍 Richtig hinstellen";
+  if (!done) coach(null);
+}
+function placeSay(text, now) {
+  // nur bei neuer Anweisung (frühestens 1,8 s nach der letzten) oder alle 5 s wiederholen
+  if (now < place.sayT) return;
+  if (text !== place.say ? now - place.sayT > 1800 : now - place.sayT > 5000) { speak(text); place.say = text; place.sayT = now; }
+}
+// Prüft ein Bild; gibt { ok, big, small, say, ang } zurück (auch für Tests nutzbar)
+function judgePlace(lm, wl, W, H, lead, hist) {
+  if (!lm) return { key: "none", ok: false, big: "🙈 Ich sehe dich nicht", small: "stell dich vor die Kamera, ganzer Oberkörper ins Bild", say: "Ich sehe dich nicht. Stell dich vor die Kamera." };
+  const P = i => ({ x: lm[i].x * W, y: lm[i].y * H, v: lm[i].visibility ?? 1 });
+  const ls = P(11), rs = P(12), lh = P(23), rh = P(24), nose = P(0);
+  const sh = { x: (ls.x + rs.x) / 2, y: (ls.y + rs.y) / 2 }, hp = { x: (lh.x + rh.x) / 2, y: (lh.y + rh.y) / 2 };
+  // Maßstab: Rumpflänge / 1,75 ≈ Schulterbreite von vorne (ändert sich kaum, wenn du dich drehst)
+  const U = Math.hypot(sh.x - hp.x, sh.y - hp.y) / 1.75;
+  const cx = (sh.x + hp.x) / 2;
+  const leftIsPlus = ls.x > rs.x;                       // in welche Bildrichtung liegt DEINE linke Seite?
+  const side = plus => (plus === leftIsPlus ? "links" : "rechts");
+  const headCut = nose.y - 0.6 * U < 0.03 * H, hipCut = hp.y > 0.96 * H || Math.min(lh.v, rh.v) < 0.4;
+  const roomMinus = cx - 1.5 * U < 0.02 * W, roomPlus = cx + 1.5 * U > 0.98 * W;
+  if (U < 0.09 * Math.min(W, H))
+    return { key: "near", ok: false, big: "↔️ Näher ran", small: "geh ein bis zwei Schritte auf die Kamera zu", say: "Komm ein Stück näher." };
+  // 1) Winkel zuerst (beim Versetzen des Handys ändern sich Mitte und Ausschnitt ohnehin)
+  // aus den 3D-Punkten (kleinerer z-Wert = näher an der Kamera), Median über ca. 0,5 s
+  const li = lead === "L" ? 11 : 12, ri = lead === "L" ? 12 : 11;
+  const a = Math.atan2(wl[ri].z - wl[li].z, Math.abs(wl[li].x - wl[ri].x) || 1e-6) * 180 / Math.PI;
+  hist.push(a); if (hist.length > 30) hist.shift();
+  const ang = median(hist);
+  const leadSide = lead === "L" ? "links" : "rechts", backSide = lead === "L" ? "rechts" : "links";
+  const arrow = s => (s === "links" ? "⬅️" : "➡️");
+  if (hist.length < 10) return { key: "wait", ok: false, big: "⏳ Messe den Winkel …", small: "kurz ruhig in der Deckung stehen", say: "" };
+  if (ang < PLACE_ANG.min)
+    return { key: "angLow", ok: false, ang, big: `${arrow(leadSide)} Handy weiter nach ${leadSide}`, small: `Winkel ${Math.round(ang)}° · Ziel ${PLACE_ANG.ideal}° · Handy Richtung deiner Führhand versetzen und wieder auf dich richten – du selbst drehst dich nicht`, say: `Stell das Handy weiter nach ${leadSide}, Richtung deiner Führhand, und richte es wieder auf dich.` };
+  if (ang > PLACE_ANG.max)
+    return { key: "angHigh", ok: false, ang, big: `${arrow(backSide)} Handy etwas zurück`, small: `Winkel ${Math.round(ang)}° · Ziel ${PLACE_ANG.ideal}° · zu seitlich – Handy etwas Richtung Mitte`, say: `Zu seitlich. Stell das Handy etwas zurück nach ${backSide}, Richtung Mitte.` };
+  // 2) Bildausschnitt
+  if ((headCut && hipCut) || (roomMinus && roomPlus))
+    return { key: "far", ok: false, ang, big: "↔️ Weiter weg", small: "geh 1–2 Schritte zurück – Kopf, Hüfte und Arme brauchen Platz", say: "Geh ein bis zwei Schritte weiter weg." };
+  if (headCut) return { key: "head", ok: false, ang, big: "⬆️ Kopf ist abgeschnitten", small: "Handy etwas nach oben kippen oder höher stellen", say: "Dein Kopf ist abgeschnitten. Kipp das Handy etwas nach oben." };
+  if (hipCut) return { key: "hip", ok: false, ang, big: "⬇️ Hüfte ist abgeschnitten", small: "Handy etwas nach unten kippen oder einen Schritt zurück", say: "Deine Hüfte ist nicht im Bild. Kipp das Handy etwas nach unten." };
+  if (roomMinus || roomPlus) {
+    const s = side(roomMinus);                          // weg vom knappen Rand
+    return { key: "side" + s, ok: false, ang, big: `${arrow(s)} Ein Stück nach ${s}`, small: "du stehst zu nah am Bildrand – beim Haken fehlt sonst Platz", say: `Geh ein kleines Stück nach ${s}.` };
+  }
+  return { key: "ok", ok: true, ang, big: "✅ Position passt", small: `Winkel ${Math.round(ang)}° · Abstand und Bildausschnitt gut`, say: "" };
+}
+function placeFrame(now, lm, wl) {
+  if (!place.active) return;
+  if (place.doneT) { if (now > place.doneT) { stopPlace(true); coach(null); } return; }
+  const r0 = judgePlace(lm, wl, canvas.width, canvas.height, leadHand(), place.hist);
+  if (!lm) place.hist.length = 0;
+  // Ein neuer Hinweis gilt erst, wenn er 0,6 s anhält (kein Flackern an Grenzwerten)
+  if (!place.cur || r0.key === place.cur.key) { place.cur = r0; place.cand = null; }
+  else if (place.cand && place.cand.key === r0.key) { if (now - place.cand.since > 600) { place.cur = r0; place.cand = null; } }
+  else place.cand = { key: r0.key, since: now };
+  const r = place.cur;
+  if (r.ok) {
+    if (place.okSince == null) place.okSince = now;
+    coach(r.big, r.small + " · ruhig stehen bleiben …", "good");
+    if (now - place.okSince > 1500) {
+      const next = calib ? "Fertig. Wenn du das Handy umgestellt hast, kalibriere neu." : "Jetzt einmal kalibrieren.";
+      speak("Perfekt, genau so stehen lassen. " + next);
+      coach("✅ Perfekt – so stehen lassen", `Winkel ${Math.round(r.ang)}° · ${calib ? "Handy umgestellt? Dann neu 🎯 kalibrieren" : "jetzt 🎯 Kalibrieren"}`, "good");
+      $("placeInfo").textContent = `✅ Zuletzt geprüft: Winkel ${Math.round(r.ang)}°, Abstand und Bildausschnitt gut.`;
+      place.doneT = now + 4000;
+    }
+    return;
+  }
+  place.okSince = null;
+  coach(r.big, r.small, "");
+  if (r.say) placeSay(r.say, now);
+}
 const glitchState = {};
 let boxLm = null;
 function updateBox(lm, wl) {
@@ -1305,6 +1408,7 @@ function calStepText() {
   coach(`${CAL_N}× ${punchName(code, hand)}`, `${dots}  ·  Schritt ${calibState.step + 1} von ${CAL_STEPS.length} · ${hand === "L" ? "linke" : "rechte"} Hand · ruhig zurück in die Deckung`);
 }
 function startCalibration() {
+  if (place.active) stopPlace(false);
   if (!running) { feedback("Erst die Kamera starten", true); return; }
   if (calibState) { stopCalibration(true); return; }
   if (combo.active) stopCombo();
@@ -1377,6 +1481,7 @@ const NUMWORD = { 1: "eins", 2: "zwei", 3: "drei", 4: "vier", 5: "fünf", 6: "se
 const combo = { active: false, phase: "idle", target: [], got: [], lastStr: "", listenUntil: 0, nextAt: 0,
                 lastPunchT: 0, timer: null, stats: { n: 0, perfect: 0, hands: 0 } };
 function startCombo() {
+  if (place.active) stopPlace(false);
   if (!running) { feedback("Erst die Kamera starten", true); return; }
   if (combo.active) { stopCombo(); return; }
   if (calibState) stopCalibration(true);
@@ -1534,8 +1639,10 @@ function loop() {
       if (countdownActive(now)) setStatus("Countdown läuft – noch wird nicht gezählt.");
       else if (mode === "pushup") updatePush(lm); else updateBox(lm, wl);
       drawPose(boxLm);   // im Box-Modus mit den korrigierten Handpunkten (verdeckte Hand springt nicht)
+      placeFrame(now, lm, wl);
     } else {
       recFrame(now, null, null, cdEnd && now < cdEnd);
+      placeFrame(now, null, null);
     }
     if (!(res.landmarks && res.landmarks.length) && now - lastSeen > 800) {
       setStatus(mode === "pushup"
@@ -1675,6 +1782,7 @@ $("copyBtn").onclick = copyReport;
 $("recBtn").onclick = () => rec ? stopRec() : startRec("123");
 $("recBtn2").onclick = () => rec ? stopRec() : startRec("1212");
 $("recSaveBtn").onclick = saveRec;
+$("placeBtn").onclick = startPlace;
 $("cdBtn").onclick = () => {
   if (!audio) { try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
   if (running) startCountdown(); else feedback("Erst die Kamera starten", true);
