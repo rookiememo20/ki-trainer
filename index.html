@@ -7,266 +7,349 @@
 <title>KI-Trainer – Push-ups & Schläge zählen</title>
 <style>
   :root{
-    --bg:#0e1116; --panel:#171b22; --line:#2a303b; --text:#e9edf3; --muted:#9aa4b2;
-    --accent:#22c55e; --left:#38bdf8; --right:#f97316; --warn:#facc15;
+    --bg:#0b0e13; --bg2:#10141b; --panel:#151a22; --panel2:#1b212b; --line:#262d39; --text:#eef2f7; --muted:#97a2b3;
+    --accent:#22c55e; --accent2:#16a34a; --left:#38bdf8; --right:#f97316; --warn:#facc15; --bad:#f87171;
+    --r:16px; --barH:0px;
   }
-  *{box-sizing:border-box}
-  html,body{margin:0;background:var(--bg);color:var(--text);
-    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-  .wrap{max-width:1000px;margin:0 auto;padding:14px}
-  h1{font-size:1.25rem;margin:4px 0 12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-  .ver{font-size:.75rem;color:var(--muted);font-weight:400}
-  .tabs{display:flex;gap:8px;margin-bottom:12px}
-  .tab{flex:1;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--panel);
-    color:var(--text);font-size:1rem;font-weight:600;cursor:pointer}
-  .tab.active{background:var(--accent);border-color:var(--accent);color:#06240f}
-  /* Bildbereich passt sich dem Seitenverhältnis der Kamera an (keine schwarzen Ränder):
-     so breit wie möglich, aber nie höher als 80 % des Bildschirms */
-  .stage{--ar:16 / 9;position:relative;width:min(100%, calc(80vh * var(--ar)));width:min(100%, calc(80dvh * var(--ar)));
-    aspect-ratio:var(--ar);background:#000;border-radius:16px;overflow:hidden;border:1px solid var(--line);margin:0 auto}
-  /* Vollbild: Bild füllt den ganzen Bildschirm (zum Trainieren aus 2–3 m Entfernung) */
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;background:radial-gradient(1200px 600px at 50% -200px,#13202a 0%,var(--bg) 60%) fixed;color:var(--text);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  body{padding-bottom:calc(var(--barH) + env(safe-area-inset-bottom))}
+  .wrap{max-width:1280px;margin:0 auto;padding:12px 14px 20px}
+
+  /* Kopfzeile */
+  .top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:2px 0 10px}
+  h1{font-size:1.2rem;margin:0;display:flex;gap:8px;align-items:baseline;letter-spacing:.01em}
+  h1 .logo{font-size:1.35rem}
+  .ver{font-size:.72rem;color:var(--muted);font-weight:500;background:var(--panel);border:1px solid var(--line);
+    padding:2px 8px;border-radius:999px}
+  .tabs{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:4px;background:var(--panel);border:1px solid var(--line);
+    border-radius:14px;margin-bottom:12px}
+  .tab{padding:11px 8px;border-radius:10px;border:0;background:transparent;color:var(--muted);font-size:1rem;font-weight:700;cursor:pointer}
+  .tab.active{background:var(--accent);color:#052e14;box-shadow:0 2px 10px rgba(34,197,94,.35)}
+
+  /* Aufteilung: Handy = untereinander, Computer/Tablet quer = zwei Spalten */
+  .layout{display:block}
+  .side > * + *{margin-top:12px}
+
+  /* Kamerabild */
+  .stage{--ar:16 / 9;position:relative;width:min(100%, calc(66vh * var(--ar)));width:min(100%, calc(66dvh * var(--ar)));
+    aspect-ratio:var(--ar);background:#000;border-radius:var(--r);overflow:hidden;border:1px solid var(--line);margin:0 auto;
+    box-shadow:0 10px 30px rgba(0,0,0,.45)}
   .stage.full{position:fixed;inset:0;width:100vw;height:100vh;height:100dvh;aspect-ratio:auto;border-radius:0;border:0;z-index:100;margin:0}
   .stage.full .big{font-size:clamp(4rem,16vw,10rem)}
-  .fsbtn{position:absolute;right:10px;top:10px;z-index:5;background:rgba(0,0,0,.55);color:#fff;border:1px solid rgba(255,255,255,.35);
-    border-radius:10px;padding:8px 12px;font-size:1rem;font-weight:700;cursor:pointer}
-  .stage.full .fsbtn{top:max(10px, env(safe-area-inset-top));right:max(10px, env(safe-area-inset-right))}
+  .fsbtn{position:absolute;right:10px;bottom:10px;z-index:5;background:rgba(0,0,0,.55);color:#fff;border:1px solid rgba(255,255,255,.25);
+    border-radius:10px;padding:7px 11px;font-size:.9rem;font-weight:700;cursor:pointer;backdrop-filter:blur(6px)}
+  .stage.full .fsbtn{bottom:max(14px, env(safe-area-inset-bottom));right:max(14px, env(safe-area-inset-right))}
   .stage video,.stage canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
   .mirror{transform:scaleX(-1)}
   .placeholder{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-    text-align:center;color:var(--muted);padding:20px;font-size:1rem;line-height:1.5}
+    text-align:center;color:var(--muted);padding:24px;font-size:1rem;line-height:1.6}
+  .placeholder .ph{font-size:3rem;display:block;margin-bottom:6px}
+  .stage .placeholder:not(.hidden) ~ .hud, .stage .placeholder:not(.hidden) ~ .depth{visibility:hidden}
   .hud{position:absolute;top:10px;left:50%;transform:translateX(-50%);text-align:center;pointer-events:none}
-  .big{font-size:clamp(3rem,12vw,6.5rem);font-weight:800;line-height:1;
-    text-shadow:0 3px 14px rgba(0,0,0,.8)}
-  .biglabel{font-size:.95rem;color:#fff;opacity:.85;text-shadow:0 2px 6px #000}
+  .big{font-size:clamp(3rem,12vw,6.5rem);font-weight:900;line-height:1;text-shadow:0 3px 14px rgba(0,0,0,.8);font-variant-numeric:tabular-nums}
+  .biglabel{font-size:.95rem;color:#fff;opacity:.9;text-shadow:0 2px 6px #000;font-weight:600}
   .feedback{position:absolute;bottom:14px;left:50%;transform:translateX(-50%);
-    background:rgba(0,0,0,.65);padding:8px 16px;border-radius:999px;font-weight:700;
-    font-size:1.05rem;opacity:0;transition:opacity .25s;white-space:nowrap}
+    background:rgba(0,0,0,.7);padding:8px 16px;border-radius:999px;font-weight:700;
+    font-size:1.05rem;opacity:0;transition:opacity .25s;white-space:nowrap;max-width:94%;overflow:hidden;text-overflow:ellipsis}
   .feedback.show{opacity:1}
   .feedback.warn{color:var(--warn)}
   .countdown{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
     background:rgba(0,0,0,.45);pointer-events:none}
-  .countdown .n{font-size:clamp(5rem,25vw,12rem);font-weight:900;line-height:1;color:var(--warn);
-    text-shadow:0 4px 20px rgba(0,0,0,.9)}
-  .countdown .t{font-size:1.1rem;font-weight:700;color:#fff;text-shadow:0 2px 8px #000;margin-top:8px}
-  .depth{position:absolute;right:12px;top:18%;bottom:10%;width:18px;border-radius:9px;
-    background:rgba(255,255,255,.15);overflow:hidden}
+  .countdown .n{font-size:clamp(5rem,25vw,12rem);font-weight:900;line-height:1;color:var(--warn);text-shadow:0 4px 20px rgba(0,0,0,.9)}
+  .countdown .t{font-size:1.1rem;font-weight:700;color:#fff;text-shadow:0 2px 8px #000;margin-top:8px;text-align:center;padding:0 12px}
+  .depth{position:absolute;right:12px;top:18%;bottom:14%;width:16px;border-radius:9px;background:rgba(255,255,255,.15);overflow:hidden}
   .depth>div{position:absolute;top:0;left:0;right:0;background:var(--warn);transition:height .08s}
-  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:12px 0}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
-  .card .v{font-size:1.6rem;font-weight:800}
-  .card .k{font-size:.8rem;color:var(--muted)}
-  .bars{display:grid;gap:8px;margin:6px 0 12px}
-  .bar{display:flex;align-items:center;gap:8px;font-size:.85rem;color:var(--muted)}
-  .bar .track{position:relative;flex:1;height:14px;background:var(--panel);border:1px solid var(--line);
-    border-radius:7px;overflow:hidden}
-  .bar .fill{position:absolute;left:0;top:0;bottom:0;width:0}
-  .bar .mark{position:absolute;top:0;bottom:0;width:2px;background:#fff;left:66.6%}
-  .controls{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
-  button.btn{padding:12px 16px;border-radius:12px;border:1px solid var(--line);background:var(--panel);
-    color:var(--text);font-size:.95rem;font-weight:600;cursor:pointer}
-  button.primary{background:var(--accent);border-color:var(--accent);color:#06240f}
-  button:disabled{opacity:.5}
-  .status{font-size:.9rem;color:var(--muted);min-height:1.3em;margin:6px 0}
-  details{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 14px;margin:10px 0}
-  summary{cursor:pointer;font-weight:600}
-  .row{display:flex;align-items:center;gap:10px;margin:10px 0;flex-wrap:wrap}
-  .row label{min-width:200px;font-size:.9rem}
-  .row input[type=range]{flex:1;min-width:150px}
-  .row output{min-width:48px;text-align:right;font-variant-numeric:tabular-nums}
-  .tips{font-size:.88rem;color:var(--muted);line-height:1.55}
-  .tips b{color:var(--text)}
-  select{background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px}
-  .hidden{display:none !important}
-  .warnbox{position:absolute;left:10px;top:10px;max-width:46%;background:rgba(127,29,29,.85);color:#fff;
+  .warnbox{position:absolute;left:10px;top:10px;max-width:46%;background:rgba(127,29,29,.88);color:#fff;
     border-radius:10px;padding:8px 10px;font-size:.85rem;font-weight:700;line-height:1.35;pointer-events:none}
   .coach{position:absolute;left:50%;top:52%;transform:translate(-50%,-50%);text-align:center;pointer-events:none;
-    background:rgba(0,0,0,.6);border-radius:18px;padding:14px 22px;max-width:92%}
+    background:rgba(0,0,0,.62);border-radius:18px;padding:14px 22px;max-width:92%;backdrop-filter:blur(4px)}
   .coach .c1{font-size:clamp(2rem,9vw,4.5rem);font-weight:900;line-height:1.05;color:#fff;letter-spacing:.02em}
   .coach .c2{font-size:clamp(.95rem,3vw,1.25rem);font-weight:700;color:var(--warn);margin-top:6px}
-  .coach.good .c1{color:var(--accent)} .coach.bad .c1{color:#f87171} .coach.mid .c1{color:var(--warn)}
-  .section{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:10px 0}
-  .section h3{margin:0 0 8px;font-size:1rem}
-  .card .v.small{font-size:1.3rem}
+  .coach.good .c1{color:var(--accent)} .coach.bad .c1{color:var(--bad)} .coach.mid .c1{color:var(--warn)}
+
+  .status{font-size:.88rem;color:var(--muted);min-height:1.3em;margin:8px 2px 0;text-align:center}
+
+  /* Bedienleiste: auf dem Handy unten fest (mit dem Daumen erreichbar) */
+  .actionbar{position:fixed;left:0;right:0;bottom:0;z-index:50;padding:10px 12px calc(10px + env(safe-area-inset-bottom));
+    background:rgba(11,14,19,.92);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-top:1px solid var(--line)}
+  .actionbar .main{display:grid;grid-template-columns:2fr 1fr;gap:8px;max-width:640px;margin:0 auto}
+  .actionbar .quick{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;max-width:640px;margin:8px auto 0}
+  .actionbar .quick button{padding:9px 4px;font-size:.78rem;border-radius:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  button.btn{padding:12px 16px;border-radius:12px;border:1px solid var(--line);background:var(--panel2);
+    color:var(--text);font-size:.95rem;font-weight:700;cursor:pointer;transition:transform .05s, background .15s}
+  button.btn:active{transform:scale(.97)}
+  button.btn:hover{background:#222a36}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#052e14}
+  button.primary:hover{background:#2bd468}
+  button.big-btn{font-size:1.05rem;padding:14px 16px}
+  button:disabled{opacity:.45}
+  .controls{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 0}
+  .controls > *{flex:1 1 auto}
+
+  /* Karten & Abschnitte */
+  .section{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px}
+  .section h3{margin:0 0 10px;font-size:1rem;display:flex;align-items:center;gap:8px}
+  .stats{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+  .stats.s3{grid-template-columns:repeat(3,1fr)}
+  .stats.s4{grid-template-columns:repeat(4,1fr);gap:6px}
+  .stats.s4 .card{padding:8px 9px}
+  .stats.s4 .card .v{font-size:1.3rem}
+  .stats.s4 .card .v.small{font-size:1.05rem}
+  .stats.s4 .card .k{font-size:.68rem;line-height:1.25}
+  .card{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:10px 12px;min-width:0}
+  .card .v{font-size:1.6rem;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.15}
+  .card .v.small{font-size:1.25rem}
+  .card .k{font-size:.76rem;color:var(--muted);margin-top:2px}
+  .card.hero{grid-column:1 / -1;display:flex;align-items:baseline;justify-content:space-between}
+  .card.hero .v{font-size:2.2rem}
+  .bars{display:grid;gap:8px;margin-top:10px}
+  .bar{display:flex;align-items:center;gap:8px;font-size:.85rem;color:var(--muted)}
+  .bar .track{position:relative;flex:1;height:12px;background:var(--bg2);border:1px solid var(--line);border-radius:7px;overflow:hidden}
+  .bar .fill{position:absolute;left:0;top:0;bottom:0;width:0}
+  .bar .mark{position:absolute;top:0;bottom:0;width:2px;background:#fff;left:66.6%}
+  details{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px}
+  summary{cursor:pointer;font-weight:700;list-style:none;display:flex;justify-content:space-between;align-items:center}
+  summary::-webkit-details-marker{display:none}
+  summary::after{content:"▾";color:var(--muted);transition:transform .2s}
+  details[open] > summary::after{transform:rotate(180deg)}
+  details[open] > summary{margin-bottom:8px}
+  .row{display:flex;align-items:center;gap:10px;margin:10px 0;flex-wrap:wrap}
+  .row label{flex:1 1 200px;font-size:.9rem}
+  .row input[type=range]{flex:1 1 150px;accent-color:var(--accent)}
+  .row output{min-width:48px;text-align:right;font-variant-numeric:tabular-nums}
+  .tips{font-size:.86rem;color:var(--muted);line-height:1.55}
+  .tips b{color:var(--text)}
+  .tips p{margin:.5em 0}
+  .legend{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 10px}
+  .legend span{font-size:.75rem;background:var(--panel2);border:1px solid var(--line);border-radius:999px;padding:3px 9px;color:var(--muted)}
+  .legend b{color:var(--text)}
+  select{background:var(--bg2);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:.92rem;min-width:0}
+  .hidden{display:none !important}
+  .hint{font-size:.8rem;color:var(--muted);margin-top:8px;line-height:1.45}
+
+  /* Breiter Bildschirm (Tablet quer, Laptop, PC): zwei Spalten, Bedienleiste unter dem Bild */
+  @media (min-width: 900px){
+    .wrap{padding:18px 22px 30px}
+    .layout{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(340px,1fr);gap:20px;align-items:start}
+    .main-col{position:sticky;top:14px}
+    .stage{width:min(100%, calc(74vh * var(--ar)));width:min(100%, calc(74dvh * var(--ar)))}
+    .actionbar{position:static;background:transparent;border:0;padding:12px 0 0;backdrop-filter:none;-webkit-backdrop-filter:none}
+    .actionbar .main,.actionbar .quick{max-width:none}
+    .actionbar .quick button{font-size:.85rem}
+    .stats.s4{gap:8px}
+    .stats.s4 .card{padding:10px 12px}
+    .stats.s4 .card .v{font-size:1.6rem}
+    .stats.s4 .card .v.small{font-size:1.25rem}
+    .stats.s4 .card .k{font-size:.76rem}
+    .side{max-height:none}
+    body{padding-bottom:0}
+    h1{font-size:1.4rem}
+  }
+  @media (min-width: 900px) and (max-height: 640px){ .stage{width:min(100%, calc(64vh * var(--ar)))} }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>🥊 KI-Trainer <span class="ver">v9.4 · Push-ups & Schläge zählen</span></h1>
+  <div class="top">
+    <h1><span class="logo">🥊</span> KI-Trainer</h1>
+    <span class="ver">v9.5</span>
+  </div>
 
   <div class="tabs">
     <button class="tab active" data-mode="pushup">💪 Push-ups</button>
     <button class="tab" data-mode="box">🥊 Boxen</button>
   </div>
 
-  <div class="stage" id="stage">
-    <button class="fsbtn" id="fsBtn" title="Vollbild">⛶ Vollbild</button>
-    <video id="video" playsinline muted></video>
-    <canvas id="canvas"></canvas>
-    <div class="placeholder" id="placeholder"><div>Tippe auf <b>„Kamera starten“</b> und erlaube den Kamerazugriff.</div></div>
-    <div class="hud"><div class="big" id="bigCount">0</div><div class="biglabel" id="bigLabel">Push-ups</div></div>
-    <div class="depth" id="depth"><div id="depthFill" style="height:0%"></div></div>
-    <div class="feedback" id="feedback"></div>
-    <div class="warnbox hidden" id="warnbox"></div>
-    <div class="coach hidden" id="coach"><div class="c1" id="coachBig"></div><div class="c2" id="coachSmall"></div></div>
-    <div class="countdown hidden" id="countdown"><div class="n" id="cdNum">5</div><div class="t">Geh in Position – gleich wird gezählt</div></div>
-  </div>
-
-  <div class="status" id="status">Bereit.</div>
-
-  <div class="controls">
-    <button class="btn primary" id="startBtn">▶ Kamera starten</button>
-    <button class="btn" id="stopBtn" disabled>⏸ Stopp</button>
-    <button class="btn" id="resetBtn">↺ Zurücksetzen</button>
-    <button class="btn" id="cdBtn">⏳ Countdown</button>
-    <button class="btn" id="flipBtn">🔄 Kamera wechseln</button>
-    <button class="btn" id="soundBtn">🔊 Ton an</button>
-  </div>
-
-  <!-- Push-up Statistiken -->
-  <div id="pushPanel">
-    <div class="stats">
-      <div class="card"><div class="v" id="pCount">0</div><div class="k">Push-ups</div></div>
-      <div class="card"><div class="v" id="pBad">0</div><div class="k">zu flach (nicht gezählt)</div></div>
-      <div class="card"><div class="v" id="pRecord">0</div><div class="k">Rekord</div></div>
-      <div class="card"><div class="v" id="pAngle">–</div><div class="k">Ellbogenwinkel</div></div>
-      <div class="card"><div class="v" id="pHeight">–</div><div class="k">Schulterhöhe (1 = oben)</div></div>
-    </div>
-  </div>
-
-  <!-- Box Statistiken -->
-  <div id="boxPanel" class="hidden">
-    <div class="stats">
-      <div class="card"><div class="v" id="bTotal">0</div><div class="k">Schläge gesamt</div></div>
-      <div class="card"><div class="v" style="color:var(--left)" id="bLeft">0</div><div class="k">linke Hand</div></div>
-      <div class="card"><div class="v" style="color:var(--right)" id="bRight">0</div><div class="k">rechte Hand</div></div>
-      <div class="card"><div class="v" id="bRate">–</div><div class="k">Schläge / Minute</div></div>
-      <div class="card"><div class="v" id="bRound">–</div><div class="k" id="bRoundLabel">Runde</div></div>
-    </div>
-    <div class="stats">
-      <div class="card"><div class="v small" id="t1">0</div><div class="k">1 · Jab</div></div>
-      <div class="card"><div class="v small" id="t2">0</div><div class="k">2 · Cross</div></div>
-      <div class="card"><div class="v small" id="t34">0 · 0</div><div class="k">3 · 4 · Haken (Führ · Schlag)</div></div>
-      <div class="card"><div class="v small" id="t56">0 · 0</div><div class="k">5 · 6 · Uppercut (Führ · Schlag)</div></div>
-    </div>
-    <div class="bars">
-      <div class="bar"><span style="width:62px;color:var(--left)">Links</span><div class="track"><div class="fill" id="sigL" style="background:var(--left)"></div><div class="mark"></div></div></div>
-      <div class="bar"><span style="width:62px;color:var(--right)">Rechts</span><div class="track"><div class="fill" id="sigR" style="background:var(--right)"></div><div class="mark"></div></div></div>
-    </div>
-    <div class="card tips" id="diag" style="margin-bottom:10px">
-      <b>Letzter Schlag</b> (Balken am weißen Strich = Schlag zählt)<br>
-      <span style="color:var(--left)">Links:</span> <span id="dL">–</span><br>
-      <span style="color:var(--right)">Rechts:</span> <span id="dR">–</span><br>
-      🛡️ <b>Deckung gefallen</b> (Hand nach dem Schlag nicht zurück ans Kinn): <span id="dDrop">0</span>
-    </div>
-
-    <div class="section">
-      <h3>🎙 Kombi-Trainer</h3>
-      <div class="tips" style="margin-bottom:8px">Die App sagt eine Kombination an (z. B. „1 – 2 – 3“), du schlägst sie, die App prüft sie. Nummern: <b>1</b> Jab · <b>2</b> Cross · <b>3</b> Führhand-Haken · <b>4</b> Schlaghand-Haken · <b>5</b> Führhand-Uppercut · <b>6</b> Schlaghand-Uppercut.</div>
-      <div class="controls" style="margin:6px 0">
-        <select id="cLevel">
-          <option value="1">Anfänger (1–2 Schläge)</option>
-          <option value="2" selected>Mittel (2–4 Schläge)</option>
-          <option value="3">Profi (4–6 Schläge)</option>
-          <option value="4">Nur gerade (1 & 2)</option>
-        </select>
-        <select id="cPause">
-          <option value="1.5">kurze Pause (1,5 s)</option>
-          <option value="2.5" selected>normale Pause (2,5 s)</option>
-          <option value="4">lange Pause (4 s)</option>
-        </select>
-        <select id="cCall">
-          <option value="num" selected>Ansage: Zahlen</option>
-          <option value="name">Ansage: Namen</option>
-        </select>
-        <button class="btn primary" id="comboBtn">▶ Kombi-Trainer starten</button>
+  <div class="layout">
+    <div class="main-col">
+      <div class="stage" id="stage">
+        <button class="fsbtn" id="fsBtn" title="Vollbild">⛶ Vollbild</button>
+        <video id="video" playsinline muted></video>
+        <canvas id="canvas"></canvas>
+        <div class="placeholder" id="placeholder"><div><span class="ph">📷</span>Tippe unten auf <b>„Kamera starten“</b><br>und erlaube den Kamerazugriff.</div></div>
+        <div class="hud"><div class="big" id="bigCount">0</div><div class="biglabel" id="bigLabel">Push-ups</div></div>
+        <div class="depth" id="depth"><div id="depthFill" style="height:0%"></div></div>
+        <div class="feedback" id="feedback"></div>
+        <div class="warnbox hidden" id="warnbox"></div>
+        <div class="coach hidden" id="coach"><div class="c1" id="coachBig"></div><div class="c2" id="coachSmall"></div></div>
+        <div class="countdown hidden" id="countdown"><div class="n" id="cdNum">5</div><div class="t">Geh in Position – gleich wird gezählt</div></div>
       </div>
-      <div class="stats" style="margin:6px 0 0">
-        <div class="card"><div class="v small" id="cN">0</div><div class="k">Kombis</div></div>
-        <div class="card"><div class="v small" style="color:var(--accent)" id="cPerfect">0</div><div class="k">sauber</div></div>
-        <div class="card"><div class="v small" style="color:var(--warn)" id="cHands">0</div><div class="k">Hände richtig</div></div>
-        <div class="card"><div class="v small" id="cRate">–</div><div class="k">Trefferquote</div></div>
+      <div class="status" id="status">Bereit.</div>
+
+      <div class="actionbar" id="actionbar">
+        <div class="main">
+          <button class="btn primary big-btn" id="startBtn">▶ Kamera starten</button>
+          <button class="btn big-btn" id="stopBtn" disabled>⏸ Stopp</button>
+        </div>
+        <div class="quick">
+          <button class="btn" id="resetBtn">↺ Neu</button>
+          <button class="btn" id="cdBtn">⏳ Timer</button>
+          <button class="btn" id="flipBtn">🔄 Kamera</button>
+          <button class="btn" id="soundBtn">🔊 Ton an</button>
+        </div>
       </div>
     </div>
 
-    <div class="section">
-      <h3>🎯 Kalibrierung</h3>
-      <div class="tips" id="calInfo">Noch nicht kalibriert. Die App nutzt allgemeine Regeln.</div>
-      <div class="tips" style="margin-top:6px">Dauert ca. 1 Minute: Du schlägst je 3× Jab, Cross, beide Haken und beide Uppercuts. Danach kennt die App <b>deine</b> Schläge und deinen Kamerawinkel. Nach dem Umstellen der Kamera neu kalibrieren.</div>
-      <div class="controls" style="margin:8px 0 0">
-        <button class="btn primary" id="calBtn">🎯 Kalibrieren</button>
-        <button class="btn" id="calDelBtn">🗑 Kalibrierung löschen</button>
+    <div class="side">
+      <!-- Push-ups -->
+      <div id="pushPanel" class="section">
+        <h3>💪 Push-ups</h3>
+        <div class="stats s3">
+          <div class="card hero"><div><div class="v" id="pCount">0</div><div class="k">Push-ups</div></div><div style="text-align:right"><div class="v small" id="pRecord">0</div><div class="k">Rekord</div></div></div>
+          <div class="card"><div class="v small" id="pBad">0</div><div class="k">zu flach</div></div>
+          <div class="card"><div class="v small" id="pAngle">–</div><div class="k">Ellbogen</div></div>
+          <div class="card"><div class="v small" id="pHeight">–</div><div class="k">Schulterhöhe</div></div>
+        </div>
       </div>
-    </div>
 
-    <div class="controls">
-      <select id="roundLen">
-        <option value="60">1:00 Runde</option>
-        <option value="120">2:00 Runde</option>
-        <option value="180" selected>3:00 Runde</option>
-      </select>
-      <button class="btn" id="roundBtn">⏱ Runde starten</button>
-      <button class="btn" id="copyBtn">📋 Messwerte kopieren</button>
+      <!-- Boxen -->
+      <div id="boxPanel" class="hidden">
+        <div class="section">
+          <h3>🥊 Schläge</h3>
+          <div class="stats s4">
+            <div class="card"><div class="v" id="bTotal">0</div><div class="k">gesamt</div></div>
+            <div class="card"><div class="v" style="color:var(--left)" id="bLeft">0</div><div class="k">linke Hand</div></div>
+            <div class="card"><div class="v" style="color:var(--right)" id="bRight">0</div><div class="k">rechte Hand</div></div>
+            <div class="card"><div class="v" id="bRate">–</div><div class="k">pro Minute</div></div>
+          </div>
+          <div class="stats s4" style="margin-top:8px">
+            <div class="card"><div class="v small" id="t1">0</div><div class="k">1 · Jab</div></div>
+            <div class="card"><div class="v small" id="t2">0</div><div class="k">2 · Cross</div></div>
+            <div class="card"><div class="v small" id="t34">0 · 0</div><div class="k">3 · 4 · Haken</div></div>
+            <div class="card"><div class="v small" id="t56">0 · 0</div><div class="k">5 · 6 · Uppercut</div></div>
+          </div>
+          <div class="bars">
+            <div class="bar"><span style="width:56px;color:var(--left)">Links</span><div class="track"><div class="fill" id="sigL" style="background:var(--left)"></div><div class="mark"></div></div></div>
+            <div class="bar"><span style="width:56px;color:var(--right)">Rechts</span><div class="track"><div class="fill" id="sigR" style="background:var(--right)"></div><div class="mark"></div></div></div>
+          </div>
+          <div class="tips" id="diag" style="margin-top:10px">
+            <span style="color:var(--left)">Links:</span> <span id="dL">–</span><br>
+            <span style="color:var(--right)">Rechts:</span> <span id="dR">–</span><br>
+            🛡️ Deckung gefallen: <span id="dDrop">0</span>
+          </div>
+        </div>
+
+        <div class="section">
+          <h3>🎙 Kombi-Trainer</h3>
+          <div class="tips">Die App sagt laut eine Kombination an, du schlägst sie, die App prüft sie.</div>
+          <div class="legend"><span><b>1</b> Jab</span><span><b>2</b> Cross</span><span><b>3</b> Führ-Haken</span><span><b>4</b> Schlag-Haken</span><span><b>5</b> Führ-Uppercut</span><span><b>6</b> Schlag-Uppercut</span></div>
+          <div class="stats" style="margin-bottom:8px">
+            <select id="cLevel">
+              <option value="1">Anfänger (1–2)</option>
+              <option value="2" selected>Mittel (2–4)</option>
+              <option value="3">Profi (4–6)</option>
+              <option value="4">Nur 1 & 2</option>
+            </select>
+            <select id="cPause">
+              <option value="1.5">Pause 1,5 s</option>
+              <option value="2.5" selected>Pause 2,5 s</option>
+              <option value="4">Pause 4 s</option>
+            </select>
+            <select id="cCall" style="grid-column:1 / -1">
+              <option value="num" selected>Ansage: Zahlen („eins, zwei …“)</option>
+              <option value="name">Ansage: Namen („Jab, Cross …“)</option>
+              <option value="both">Ansage: Zahl + Name</option>
+            </select>
+          </div>
+          <button class="btn primary" id="comboBtn" style="width:100%">▶ Kombi-Trainer starten</button>
+          <div class="stats s4" style="margin-top:10px">
+            <div class="card"><div class="v small" id="cN">0</div><div class="k">Kombis</div></div>
+            <div class="card"><div class="v small" style="color:var(--accent)" id="cPerfect">0</div><div class="k">sauber</div></div>
+            <div class="card"><div class="v small" style="color:var(--warn)" id="cHands">0</div><div class="k">Hände richtig</div></div>
+            <div class="card"><div class="v small" id="cRate">–</div><div class="k">Quote</div></div>
+          </div>
+        </div>
+
+        <div class="section">
+          <h3>⏱ Runde</h3>
+          <div class="stats">
+            <select id="roundLen">
+              <option value="60">1:00 Runde</option>
+              <option value="120">2:00 Runde</option>
+              <option value="180" selected>3:00 Runde</option>
+            </select>
+            <button class="btn" id="roundBtn">⏱ Runde starten</button>
+          </div>
+          <div class="card" style="margin-top:8px"><div class="v small" id="bRound">–</div><div class="k" id="bRoundLabel">Runde</div></div>
+        </div>
+
+        <div class="section">
+          <h3>🎯 Kalibrierung</h3>
+          <div class="tips" id="calInfo">Noch nicht kalibriert. Die App nutzt allgemeine Regeln.</div>
+          <div class="hint">Ca. 1 Minute: je 3× Jab, Cross, beide Haken und beide Uppercuts – einzeln, in deinem normalen Tempo. Nach dem Umstellen der Kamera neu kalibrieren.</div>
+          <div class="controls">
+            <button class="btn primary" id="calBtn">🎯 Kalibrieren</button>
+            <button class="btn" id="calDelBtn">🗑 Löschen</button>
+          </div>
+        </div>
+
+        <details>
+          <summary>🧪 Fehlersuche & Testaufnahme</summary>
+          <div class="controls" style="margin-top:0">
+            <button class="btn" id="recBtn">⏺ Testaufnahme mit Ansagen</button>
+            <button class="btn hidden" id="recSaveBtn">💾 Aufnahme speichern</button>
+            <button class="btn" id="copyBtn">📋 Messwerte kopieren</button>
+          </div>
+          <div id="recInfo" class="hint">Nimmt deine Körperpunkte auf (kein Video, kein Bild) – damit kann die Erkennung am PC mit deinen echten Bewegungen getestet werden.</div>
+          <textarea id="reportBox" class="hidden" style="width:100%;height:160px;margin-top:8px;background:var(--bg2);color:var(--text);border:1px solid var(--line);border-radius:10px;font-size:11px"></textarea>
+        </details>
+      </div>
+
+      <details>
+        <summary>⚙️ Einstellungen</summary>
+        <div class="row"><label>Countdown vor dem Zählen</label>
+          <select id="sCd">
+            <option value="0">Aus</option>
+            <option value="3">3 Sekunden</option>
+            <option value="5" selected>5 Sekunden</option>
+            <option value="10">10 Sekunden</option>
+          </select>
+        </div>
+        <div class="hint" style="margin-top:-4px">Startet automatisch bei „Kamera starten“, „Neu“ und „Runde starten“ – oder jederzeit mit „⏳ Timer“. Während er läuft, wird nichts gezählt.</div>
+        <div class="row"><label>KI-Modell</label>
+          <select id="sModel">
+            <option value="full" selected>Genau (empfohlen)</option>
+            <option value="lite">Schnell (ältere Handys)</option>
+            <option value="heavy">Sehr genau (langsam)</option>
+          </select>
+        </div>
+        <div id="pushSettings">
+          <div class="row"><label>Unten: Ellbogen kleiner als</label><input type="range" id="sDown" min="60" max="130" step="1" value="105"><output id="oDown">105°</output></div>
+          <div class="row"><label>Oben: Ellbogen größer als</label><input type="range" id="sUp" min="130" max="175" step="1" value="150"><output id="oUp">150°</output></div>
+          <div class="row"><label>Unten: Schulterhöhe kleiner als</label><input type="range" id="sHDown" min="0.20" max="0.75" step="0.01" value="0.55"><output id="oHDown">0.55</output></div>
+          <div class="row"><label>Oben: Schulterhöhe größer als</label><input type="range" id="sHUp" min="0.55" max="0.95" step="0.01" value="0.75"><output id="oHUp">0.75</output></div>
+          <div class="row"><label>Zahl laut ansagen</label><input type="checkbox" id="sVoice" checked></div>
+          <div class="hint">Die App misst den Ellbogenwinkel und wie hoch deine Schultern über den Händen sind und nimmt das Signal, das sich bei dir stärker bewegt. Der gelbe Balken rechts im Bild zeigt die Tiefe: ganz voll = unten erkannt.</div>
+        </div>
+        <div id="boxSettings" class="hidden">
+          <div class="row"><label>Auslage</label>
+            <select id="sStance">
+              <option value="orthodox" selected>Orthodox (linke Führhand)</option>
+              <option value="southpaw">Rechtsauslage (rechte Führhand)</option>
+            </select>
+          </div>
+          <div class="row"><label>Schlagschwelle (weniger = empfindlicher)</label><input type="range" id="sRise" min="0.40" max="1.40" step="0.01" value="0.75"><output id="oRise">0.75</output></div>
+          <div class="hint">Gemessen wird, wie weit sich <b>Faust und Ellbogen</b> aus deiner Deckung bewegen – relativ zu deinem Oberkörper. Erreicht ein Balken den weißen Strich, zählt der Schlag. Nach einer <b>Kalibrierung</b> hat jede Hand ihre eigene Schwelle, dann wirkt dieser Regler nicht mehr.</div>
+        </div>
+      </details>
+
+      <details>
+        <summary>💡 So stellst du die Kamera auf</summary>
+        <div class="tips">
+          <p><b>Push-ups:</b> Handy <b>quer</b> auf den Boden, <b>seitlich</b> von dir, ca. 1,5–2 m weg. Der ganze Körper muss im Bild sein.</p>
+          <p><b>Boxen:</b> Handy auf Bauch- bis Kopfhöhe, 2–3 m entfernt. Stell dich in deine Auslage und dreh dich so, dass die Kamera <b>deine Brust</b> und <b>beide Fäuste</b> sieht (bei Orthodox steht die Kamera eher rechts vor dir). <b>Nicht im Profil</b> zur Kamera stehen. Kopf, Oberkörper, Hüfte und beide Fäuste müssen immer im Bild sein. Danach einmal <b>🎯 Kalibrieren</b>.</p>
+          <p><b>Allgemein:</b> Helles Licht von vorne, ruhiger Hintergrund. Die Erkennung läuft komplett auf deinem Gerät – es wird kein Video hochgeladen.</p>
+        </div>
+      </details>
     </div>
-    <div class="controls">
-      <button class="btn" id="recBtn">⏺ Testaufnahme mit Ansagen</button>
-      <button class="btn hidden" id="recSaveBtn">💾 Aufnahme speichern</button>
-    </div>
-    <div id="recInfo" class="hint" style="font-size:.8rem;color:var(--muted)">Nimmt deine Körperpunkte auf (kein Video, kein Bild) – damit kann ich die Erkennung am PC mit deinen echten Bewegungen beliebig oft testen.</div>
-    <textarea id="reportBox" class="hidden" style="width:100%;height:160px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:8px;font-size:11px"></textarea>
   </div>
-
-  <details>
-    <summary>⚙️ Einstellungen</summary>
-    <div class="row"><label>Countdown vor dem Zählen</label>
-      <select id="sCd">
-        <option value="0">Aus</option>
-        <option value="3">3 Sekunden</option>
-        <option value="5" selected>5 Sekunden</option>
-        <option value="10">10 Sekunden</option>
-      </select>
-    </div>
-    <div class="tips" style="margin-top:-4px">Startet automatisch bei „Kamera starten“, „Zurücksetzen“ und „Runde starten“ – oder jederzeit mit „⏳ Countdown“. Während er läuft, wird nichts gezählt.</div>
-    <div class="row"><label>KI-Modell</label>
-      <select id="sModel">
-        <option value="full" selected>Genau (empfohlen)</option>
-        <option value="lite">Schnell (für ältere Handys)</option>
-        <option value="heavy">Sehr genau (langsam)</option>
-      </select>
-    </div>
-    <div id="pushSettings">
-      <div class="row"><label>Unten: Ellbogen kleiner als</label><input type="range" id="sDown" min="60" max="130" step="1" value="105"><output id="oDown">105°</output></div>
-      <div class="row"><label>Oben: Ellbogen größer als</label><input type="range" id="sUp" min="130" max="175" step="1" value="150"><output id="oUp">150°</output></div>
-      <div class="row"><label>Unten: Schulterhöhe kleiner als</label><input type="range" id="sHDown" min="0.20" max="0.75" step="0.01" value="0.55"><output id="oHDown">0.55</output></div>
-      <div class="row"><label>Oben: Schulterhöhe größer als</label><input type="range" id="sHUp" min="0.55" max="0.95" step="0.01" value="0.75"><output id="oHUp">0.75</output></div>
-      <div class="row"><label>Zahl laut ansagen</label><input type="checkbox" id="sVoice" checked></div>
-      <div class="tips">Die App misst zwei Dinge: den Ellbogenwinkel und wie hoch deine Schultern über den Händen sind. Sie nimmt automatisch das Signal, das sich bei dir stärker bewegt. Der gelbe Balken rechts im Bild zeigt die Tiefe: ganz voll = unten erkannt.</div>
-    </div>
-    <div id="boxSettings" class="hidden">
-      <div class="row"><label>Auslage</label>
-        <select id="sStance">
-          <option value="orthodox" selected>Orthodox (linke Führhand)</option>
-          <option value="southpaw">Rechtsauslage (rechte Führhand)</option>
-        </select>
-      </div>
-      <div class="row"><label>Schlagschwelle (weniger = empfindlicher)</label><input type="range" id="sRise" min="0.40" max="1.40" step="0.01" value="0.75"><output id="oRise">0.75</output></div>
-      <div class="tips">Gemessen wird, wie weit sich <b>Faust und Ellbogen</b> aus deiner Deckung bewegen – relativ zu deinem Oberkörper. Kopfbewegungen, Abtauchen und Eindrehen zählen deshalb nicht. Erreicht ein Balken den weißen Strich, zählt der Schlag.<br>
-      Nach einer <b>Kalibrierung</b> hat jede Hand ihre eigene Schwelle – dann wirkt dieser Regler nur noch, wenn du die Kalibrierung löschst.<br>
-      <b>Zählt bei kleinen Bewegungen:</b> Schwelle höher. <b>Schläge fehlen:</b> Schwelle niedriger oder kalibrieren.</div>
-    </div>
-  </details>
-
-  <details open>
-    <summary>💡 So stellst du die Kamera auf</summary>
-    <div class="tips">
-      <p><b>Push-ups:</b> Handy <b>quer</b> auf den Boden stellen (z. B. an eine Flasche gelehnt), <b>seitlich</b> von dir, ca. 1,5–2 m weg. Dein ganzer Körper von Kopf bis Füße muss im Bild sein. Von vorne geht auch, dann das Handy ca. 1,5 m vor deinen Kopf stellen, sodass Schultern und Hände gut zu sehen sind.</p>
-      <p><b>Boxen:</b> Handy auf Brust- bis Kopfhöhe, 2–3 m entfernt. Stell dich in deine Auslage und dreh dich so, dass die Kamera <b>deine Brust sieht</b> und <b>beide Fäuste</b> frei sind – die Kamera steht also eher vor deiner <b>Schlaghand-Seite</b> (bei Orthodox: rechts vor dir). <b>Nicht seitlich (im Profil) zur Kamera stehen</b>, sonst verdeckt dein Körper die hintere Hand. Kopf, Oberkörper, Hüfte und beide Fäuste müssen immer im Bild sein, auch bei ausgestrecktem Arm. Danach einmal <b>🎯 Kalibrieren</b>. Wenn etwas nicht passt, erscheint oben links im Bild eine rote Warnung.</p>
-      <p><b>Allgemein:</b> Helles Licht von vorne (nicht Gegenlicht vom Fenster), ruhiger Hintergrund, eher enge Kleidung. Die Erkennung läuft komplett auf deinem Handy, es wird kein Video hochgeladen.</p>
-    </div>
-  </details>
 </div>
 
 <script type="module">
-const APP_VER = "v9.4";
+const APP_VER = "v9.5";
 import { PoseLandmarker, FilesetResolver, DrawingUtils }
   from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
 
@@ -1219,6 +1302,9 @@ function startCombo() {
   if (combo.active) { stopCombo(); return; }
   if (calibState) stopCalibration(true);
   combo.active = true; combo.stats = { n: 0, perfect: 0, hands: 0 };
+  // Sprachausgabe hier (direkt beim Antippen) einmal starten – sonst blockiert das iPhone spätere Ansagen
+  if (!S.sound) { S.sound = true; $("soundBtn").textContent = "🔊 Ton an"; }
+  speak("Kombi-Trainer. Hör auf die Ansagen.");
   const cd = startCountdown();
   combo.phase = "wait"; combo.nextAt = performance.now() + cd + 600;
   clearInterval(combo.timer); combo.timer = setInterval(comboTick, 50);
@@ -1249,10 +1335,13 @@ function announceCombo(now) {
   combo.got = [];
   const names = combo.target.map(c => punchName(c, handOfCode(c)));
   coach(combo.target.join(" – "), names.join(" · "));
-  const text = $("cCall").value === "num" ? combo.target.map(c => NUMWORD[c]).join(", ") : names.join(", ");
+  const mode = $("cCall").value;
+  const text = mode === "num" ? combo.target.map(c => NUMWORD[c]).join(", ")
+             : mode === "name" ? names.join(", ")
+             : combo.target.map((c, i) => `${NUMWORD[c]}, ${names[i]}`).join(". ");
   combo.phase = "listen";
   // Zeit zum Schlagen: Ansage + ca. 0,6 s pro Schlag + Reserve
-  combo.listenUntil = now + 450 * combo.target.length + 600 * combo.target.length + 1500;
+  combo.listenUntil = now + (mode === "both" ? 900 : 450) * combo.target.length + 600 * combo.target.length + 1500;
   speak(text);
 }
 function comboPunch(code, t) {
@@ -1267,13 +1356,13 @@ function evaluateCombo(now) {
   combo.stats.n++;
   if (res === "perfect") {
     combo.stats.perfect++;
-    coach("✅ Sauber!", combo.target.join(" – "), "good"); beep(1200, 0.12, 0.25);
+    coach("✅ Sauber!", combo.target.join(" – "), "good"); beep(1200, 0.12, 0.25); speak("Sauber");
   } else if (res === "hands") {
     combo.stats.hands++;
-    coach("🟡 Fast!", `Hände richtig · erkannt: ${combo.got.join(" – ")}`, "mid"); beep(700, 0.12, 0.2);
+    coach("🟡 Fast!", `Hände richtig · erkannt: ${combo.got.join(" – ")}`, "mid"); beep(700, 0.12, 0.2); speak("Fast");
   } else {
     coach("❌ Nochmal", combo.got.length ? `erkannt: ${combo.got.join(" – ")} · gefordert: ${combo.target.join(" – ")}` : "kein Schlag erkannt", "bad");
-    beep(260, 0.2, 0.2);
+    beep(260, 0.2, 0.2); speak("Nochmal");
   }
   combo.phase = "result";
   combo.nextAt = now + 900 + parseFloat($("cPause").value) * 1000;
@@ -1481,6 +1570,14 @@ function setFull(on) {
 }
 $("fsBtn").onclick = () => setFull(!$("stage").classList.contains("full"));
 document.addEventListener("fullscreenchange", () => { if (!document.fullscreenElement && $("stage").classList.contains("full")) setFull(false); });
+// Feste Bedienleiste unten (Handy): Seite bekommt unten so viel Platz, dass nichts verdeckt wird
+function sizeBar() {
+  const bar = $("actionbar");
+  const h = bar && getComputedStyle(bar).position === "fixed" ? bar.offsetHeight : 0;
+  document.documentElement.style.setProperty("--barH", h + "px");
+}
+window.addEventListener("resize", sizeBar); window.addEventListener("orientationchange", sizeBar);
+setTimeout(sizeBar, 0);
 $("startBtn").onclick = start;
 $("stopBtn").onclick = stop;
 $("resetBtn").onclick = () => {
