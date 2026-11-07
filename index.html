@@ -155,7 +155,7 @@
 <div class="wrap">
   <div class="top">
     <h1><span class="logo">🥊</span> KI-Trainer</h1>
-    <span class="ver">v9.5</span>
+    <span class="ver">v9.6</span>
   </div>
 
   <div class="tabs">
@@ -290,6 +290,7 @@
           <summary>🧪 Fehlersuche & Testaufnahme</summary>
           <div class="controls" style="margin-top:0">
             <button class="btn" id="recBtn">⏺ Testaufnahme mit Ansagen</button>
+            <button class="btn" id="recBtn2">⏺ Aufnahme 1-2-1-2</button>
             <button class="btn hidden" id="recSaveBtn">💾 Aufnahme speichern</button>
             <button class="btn" id="copyBtn">📋 Messwerte kopieren</button>
           </div>
@@ -349,7 +350,7 @@
 </div>
 
 <script type="module">
-const APP_VER = "v9.5";
+const APP_VER = "v9.6";
 import { PoseLandmarker, FilesetResolver, DrawingUtils }
   from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
 
@@ -985,9 +986,10 @@ const REC_IDX = [0, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24];
 const REC_MAX_MS = 150000;
 let rec = null, recDone = null;
 // Ablauf der Testaufnahme mit Sprachansagen (Zeiten in ms ab Ende des Countdowns)
-function buildRecScript() {
+function buildRecScript(kind) {
   const L = leadHand() === "L";
   const cues = [];
+  if (kind === "1212") return buildRecScript1212(cues);
   let t = 0;
   const add = (dt, say, big, small, want) => { cues.push({ at: t, say, big, small, want }); t += dt; };
   add(3500, "Zehn mal eins zwei drei. Nach jeder Ansage einmal.", "10× 1-2-3", "nach jeder Ansage einmal schlagen");
@@ -997,6 +999,20 @@ function buildRecScript() {
                    [5, L ? "linker Uppercut" : "rechter Uppercut"], [6, L ? "rechter Uppercut" : "linker Uppercut"]];
   for (const [code, name] of singles) for (let i = 1; i <= 3; i++) add(2300, name, `${code} · ${name}`, `${i} von 3`, String(code));
   add(13000, "Jetzt zehn Sekunden nur Deckung. Hüpfen, Kopf bewegen, nicht schlagen.", "🛡️ Nur Deckung", "hüpfen, Kopf bewegen – NICHT schlagen", "");
+  add(0, "Fertig. Danke!", "Fertig ✅", "jetzt „Aufnahme speichern“ antippen", "end");
+  return cues;
+}
+// Ablauf 2: Jab-Cross-Jab-Cross in drei Tempi (zum Prüfen, ob links/rechts vertauscht wird)
+function buildRecScript1212(cues) {
+  let t = 0;
+  const add = (dt, say, big, small, want) => { cues.push({ at: t, say, big, small, want }); t += dt; };
+  add(4000, "Eins zwei eins zwei. Erst langsam. Nach jeder Ansage einmal.", "1-2-1-2 langsam", "nach jeder Ansage einmal");
+  for (let i = 1; i <= 4; i++) add(4300, "eins zwei eins zwei", "1 – 2 – 1 – 2", `langsam ${i} von 4`, "1212");
+  add(3500, "Jetzt in deinem normalen Tempo.", "Normales Tempo", "so wie du sonst trainierst");
+  for (let i = 1; i <= 6; i++) add(3400, "eins zwei eins zwei", "1 – 2 – 1 – 2", `normal ${i} von 6`, "1212");
+  add(3500, "Jetzt so schnell wie im Training.", "Schnell", "so schnell wie beim Training");
+  for (let i = 1; i <= 6; i++) add(3000, "eins zwei eins zwei", "1 – 2 – 1 – 2", `schnell ${i} von 6`, "1212");
+  add(10000, "Jetzt acht Sekunden nur Deckung. Hüpfen, Kopf bewegen, nicht schlagen.", "🛡️ Nur Deckung", "hüpfen, Kopf bewegen – NICHT schlagen", "");
   add(0, "Fertig. Danke!", "Fertig ✅", "jetzt „Aufnahme speichern“ antippen", "end");
   return cues;
 }
@@ -1024,28 +1040,29 @@ function recFrame(now, lm, wl, cd) {
     }
   }
   if (now - rec.t0 > REC_MAX_MS || (rec.endAt && now >= rec.endAt)) stopRec();
-  else $("recBtn").textContent = `⏹ Aufnahme abbrechen`;
+  else { $("recBtn").textContent = `⏹ Aufnahme abbrechen`; $("recBtn2").textContent = `⏹ Aufnahme abbrechen`; }
 }
-function startRec() {
+function startRec(kind) {
   if (!running) { feedback("Erst die Kamera starten", true); return; }
   if (mode !== "box") { feedback("Erst auf „Boxen“ wechseln", true); return; }
   if (calibState) stopCalibration(true);
   if (combo.active) stopCombo();
-  rec = { t0: performance.now(), frames: [], cues: [], script: buildRecScript(), ci: 0, sStart: null, endAt: null };
+  rec = { t0: performance.now(), frames: [], cues: [], kind: kind || "123", script: buildRecScript(kind), ci: 0, sStart: null, endAt: null };
   recDone = null; $("recSaveBtn").classList.add("hidden");
   recSpeak("Gleich geht es los. Hör einfach auf die Ansagen.");
   startCountdown();
-  coach("Gleich geht's los", "hör auf die Ansagen – ca. 1½ Minuten");
+  coach("Gleich geht's los", `hör auf die Ansagen – ca. ${kind === "1212" ? "1¼" : "1½"} Minuten`);
   $("recInfo").textContent = "Aufnahme läuft – einfach den Ansagen folgen. Am Ende stoppt sie von selbst.";
 }
 function stopRec() {
   if (!rec) return;
-  recDone = { app: APP_VER, date: new Date().toISOString(), stance: S.stance, model: S.model, W: canvas.width, H: canvas.height,
+  recDone = { app: APP_VER, kind: rec.kind, date: new Date().toISOString(), stance: S.stance, model: S.model, W: canvas.width, H: canvas.height,
               idx: REC_IDX, calib: calib ? { ...calib } : null, counts: { L: box.L.count, R: box.R.count }, typeCount: { ...typeCount },
               cues: rec.cues, complete: rec.ci >= rec.script.length, frames: rec.frames };
   rec = null;
   setTimeout(() => { if (!rec && !calibState && !combo.active) coach("Fertig ✅", "jetzt „💾 Aufnahme speichern“ antippen", "good"); }, 50);
   $("recBtn").textContent = "⏺ Testaufnahme mit Ansagen";
+  $("recBtn2").textContent = "⏺ Aufnahme 1-2-1-2";
   $("recSaveBtn").classList.remove("hidden");
   $("recInfo").textContent = recDone.complete
     ? `Aufnahme fertig (${recDone.frames.length} Bilder). Tippe auf „Aufnahme speichern“ und schick mir die Datei hier im Chat (Büroklammer → Datei).`
@@ -1054,7 +1071,7 @@ function stopRec() {
 }
 async function saveRec() {
   if (!recDone) return;
-  const name = `ki-trainer-aufnahme-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")}.json`;
+  const name = `ki-trainer-aufnahme${recDone.kind === "1212" ? "-1212" : ""}-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")}.json`;
   const blob = new Blob([JSON.stringify(recDone)], { type: "application/json" });
   try {
     const file = new File([blob], name, { type: "application/json" });
@@ -1592,7 +1609,8 @@ $("resetBtn").onclick = () => {
   render();
 };
 $("copyBtn").onclick = copyReport;
-$("recBtn").onclick = () => rec ? stopRec() : startRec();
+$("recBtn").onclick = () => rec ? stopRec() : startRec("123");
+$("recBtn2").onclick = () => rec ? stopRec() : startRec("1212");
 $("recSaveBtn").onclick = saveRec;
 $("cdBtn").onclick = () => {
   if (!audio) { try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
