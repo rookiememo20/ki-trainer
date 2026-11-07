@@ -91,7 +91,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>🥊 KI-Trainer <span class="ver">v9.2 · Push-ups & Schläge zählen</span></h1>
+  <h1>🥊 KI-Trainer <span class="ver">v9.3 · Push-ups & Schläge zählen</span></h1>
 
   <div class="tabs">
     <button class="tab active" data-mode="pushup">💪 Push-ups</button>
@@ -266,7 +266,7 @@
 </div>
 
 <script type="module">
-const APP_VER = "v9.2";
+const APP_VER = "v9.3";
 import { PoseLandmarker, FilesetResolver, DrawingUtils }
   from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
 
@@ -444,7 +444,10 @@ class PunchArm {
       if (P.feat[k] == null || top[0].side[k] == null) continue;
       P.feat[k] = median(top.map(f => f.side[k]));
     }
-    const feat = { ...P.feat, upGain: P.up, fwdGain: P.fw, upShare, gain: P.gain };
+    // Weg vom Startpunkt zum Treffpunkt in Oberkörper-Achsen (Faust quer / vor / hoch, Ellbogen hoch / quer)
+    const a = P.startP, b = P.endP || P.startP, sw = P.sw || 1;
+    const path = { pIn: (b.in - a.in) / sw, pF: (b.f - a.f) / sw, pU: (b.u - a.u) / sw, eU: (b.eu - a.eu) / sw, eIn: (b.ein - a.ein) / sw };
+    const feat = { ...P.feat, upGain: P.up, fwdGain: P.fw, upShare, gain: P.gain, ...path };
     this.lastFeat = feat;
     return { kind: "type", feat, suspect: !!P.suspect, gap: P.gap ?? 999 };
   }
@@ -521,7 +524,7 @@ class PunchArm {
       // Armhaltung dort messen, wo die Faust am weitesten vom STARTPUNKT der Bewegung weg ist
       // (bei schnellen Kombis startet z. B. der Haken, bevor die Faust nach dem Jab zurück in der Deckung ist)
       const fromStart = dP(p, P.startP) / sw;
-      if (fromStart > P.D) { P.D = fromStart; P.feat = snap(); }
+      if (fromStart > P.D) { P.D = fromStart; P.feat = snap(); P.endP = p; }
       P.frames.push({ D: fromStart, side });
       if (G > P.G) P.G = G;
       P.gain = Math.max(P.gain, G - P.base);
@@ -545,7 +548,7 @@ class PunchArm {
           if (b.G < gMin && b.p) { gMin = b.G; startP = b.p; }       // Startpunkt = ruhigster Punkt vor dem Schlag
         }
         this.pending = { t0: t, G, feat: snap(), uMin, fMin, up: (p.u - uMin) / sw, fw: (p.f - fMin) / sw, base, gain: G - base,
-                         startP, D: dP(p, startP) / sw, frames: [{ D: dP(p, startP) / sw, side }],
+                         startP, endP: p, sw, D: dP(p, startP) / sw, frames: [{ D: dP(p, startP) / sw, side }],
                          vUp: Math.max(vUp, this.lastVUp || 0), vFwd: Math.max(vFwd, this.lastVFwd || 0) };
         out.push({ kind: "hit" });
       }
@@ -563,10 +566,14 @@ class PunchArm {
 
 // Schlagart bestimmen. calib = gelernte Mittelwerte je Hand und Art (aus der Kalibrierung) oder null
 const PTYPES = ["straight", "hook", "upper"];
-function classifyPunch(feat, hand, calib) {
+function classifyPunch(feat, hand, calib, leadH = "L") {
   // Hände runtergenommen: Oberarm hängt senkrecht UND (Unterarm zeigt nach unten ODER Faust tief unter der Schulter).
   // Ein tiefer Haken (Ellbogen unten, Unterarm waagerecht quer) bleibt ein Schlag.
   if (feat.uaU < -0.75 && (feat.faUp < -0.3 || (feat.handH ?? -9) < -0.9)) return "none";
+  const lead = hand === leadH;
+  // Deckungshaltung: Oberarm hängt viel tiefer als bei all deinen echten Schlägen und Arm im Bild kaum gestreckt
+  const uaRef = uaRefOf(calib, hand);
+  if (uaRef != null && feat.uaU < uaRef - 0.6 && feat.ext2 < 0.5) return "none";
   if (calib && calib[hand]) {
     const C = calib[hand];
     const dist = ty => {
@@ -592,11 +599,21 @@ function classifyPunch(feat, hand, calib) {
       // Faust geht deutlich quer (viel mehr als bei deinem Uppercut) und Unterarm steht flacher als beim Uppercut → Haken
       else if (C.hook && feat.faIn >= U.faIn + 0.3 && feat.faUp < U.faUp - 0.1) best = "hook";
     }
+    // Führhand: Jab geht nach vorne/außen, Haken quer – Endhaltung und Weg der Faust zusammen betrachten
+    if (lead && feat.pIn != null && best === "hook" && C.straight && feat.ext2 >= 0.85 && feat.faIn + 0.5 * feat.pIn < -0.25) best = "straight";
+    if (lead && feat.pIn != null && best === "upper" && C.straight && feat.ext2 >= 0.9 && feat.pIn < -0.6) best = "straight";
+    // Schlaghand: Haken = Faust geht kaum nach vorne, Oberarm schwenkt nach außen; Cross = Faust geht nach vorne
+    if (!lead && feat.pF != null && best === "straight" && C.hook && feat.pF < 0.1 && feat.uaIn < -0.15) best = "hook";
+    else if (!lead && feat.pF != null && best === "hook" && C.straight && feat.pF >= 0.15 && feat.uaIn > 0.1 && feat.ext2 >= 0.9) best = "straight";
     if (best === "hook" && C.straight && C.hook && C.hook.faIn - C.straight.faIn >= 0.3 &&
         feat.faIn < C.hook.faIn - 0.08 && feat.ext2 >= 0.9) {
       // Arm im Bild voll gestreckt und Faust geht weniger quer als bei deinem Haken → gerader Schlag (Jab/Cross)
       best = "straight";
     }
+    // "Uppercut", bei dem die Faust gar nicht nach oben geht = Nachzucken nach einem Schlag
+    if (best === "upper" && feat.upGain != null && feat.upGain < 0.15 && (feat.upShare ?? 1) < 0.2) return "none";
+    // Faust geht deutlich nach hinten UND nach unten = Hände runternehmen (beim Uppercut wird das tiefste Ausholen gemessen)
+    if (best !== "upper" && feat.pF != null && feat.pF < -0.4 && feat.pU < -0.4) return "none";
     if (best) return best;
   }
   // Ohne Kalibrierung: Faustregeln
@@ -838,7 +855,7 @@ function logFrame(t, ex, evs) {
 }
 function logPunch(t, hand, code, feat) {
   PLOG.push(`${Math.round(t)} ${hand} ${code} ${punchName(code, hand).padEnd(15)} G ${f2(feat.G)} e3 ${f2(feat.ext3)} e2 ${f2(feat.ext2)} ` +
-            `fa(${f2(feat.faF)},${f2(feat.faIn)},${f2(feat.faUp)}) ua(${f2(feat.uaF)},${f2(feat.uaIn)},${f2(feat.uaU)}) hoch ${f2(feat.upGain)} vor ${f2(feat.fwdGain)} anteil ${f2(feat.upShare)}`);
+            `fa(${f2(feat.faF)},${f2(feat.faIn)},${f2(feat.faUp)}) ua(${f2(feat.uaF)},${f2(feat.uaIn)},${f2(feat.uaU)}) hoch ${f2(feat.upGain)} vor ${f2(feat.fwdGain)} anteil ${f2(feat.upShare)} weg(${f2(feat.pF)},${f2(feat.pIn)},${f2(feat.pU)}) ell(${f2(feat.eIn)},${f2(feat.eU)})`);
   while (PLOG.length > 80) PLOG.shift();
 }
 function buildReport() {
@@ -1067,7 +1084,7 @@ let nameTimer = null;
 const lastRealPunch = { L: -1e9, R: -1e9 };
 const guardDrops = { L: 0, R: 0 };
 function onTypedPunch(hand, feat, t) {
-  const type = classifyPunch(feat, hand, calib);
+  const type = classifyPunch(feat, hand, calib, leadHand());
   if (type === "none") {                               // Hände runtergenommen → Zählung zurücknehmen
     box[hand].count = Math.max(0, box[hand].count - 1);
     // kurz nach einem Schlag derselben Hand = Hand kommt nicht zurück zum Kinn → Deckungs-Hinweis
