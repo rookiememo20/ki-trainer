@@ -91,7 +91,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>🥊 KI-Trainer <span class="ver">v8.6 · Push-ups & Schläge zählen</span></h1>
+  <h1>🥊 KI-Trainer <span class="ver">v8.7 · Push-ups & Schläge zählen</span></h1>
 
   <div class="tabs">
     <button class="tab active" data-mode="pushup">💪 Push-ups</button>
@@ -354,34 +354,24 @@ function extractSides(lm, wl, W, H, st) {
   const P2 = i => ({ x: lm[i].x * W, y: lm[i].y * H });
   const visI = i => lm[i].visibility ?? 1;
   // 1) Vertauschte linke/rechte Punkte korrigieren
-  //    Schultern & Hüfte: Du schaust zur Kamera → deine linke Schulter ist im (ungespiegelten) Bild rechts.
-  //    Ellbogen & Handgelenke: Die KI vertauscht die Zuordnung manchmal plötzlich → solche Sprünge erkennen
-  //    (Rohdaten mit Rohdaten vergleichen, damit sich ein Fehler nicht aufschaukelt) + Notbremse über die Armlänge.
+  //    Grundsätzlich wird der KI-Zuordnung vertraut. Nur wenn ein Paar in EINEM Bild plötzlich die Plätze
+  //    tauscht (Rohdaten mit Rohdaten verglichen), wird das zurückgetauscht – höchstens 0,5 s lang,
+  //    danach gilt wieder die KI. So kann sich nie ein Fehler festsetzen.
   const map = {};
   const d = (p, q) => Math.hypot(p.x - q.x, p.y - q.y);
+  const now = st.t = (st.t || 0) + 1;                       // Bildzähler
   st.flip = st.flip || {};
-  for (const [a, b] of [[11, 12], [23, 24]]) {
-    const dx = lm[a].x - lm[b].x;
-    if (Math.abs(dx) > 0.03) st.flip[a] = dx < 0;          // eindeutig → festlegen; sonst letzte Entscheidung behalten
-    if (st.flip[a]) { map[a] = b; map[b] = a; }
-  }
-  const J0 = i => map[i] ?? i;
-  for (const [a, b, ownA, ownB] of [[13, 14, J0(11), J0(12)], [15, 16, null, null]]) {
+  for (const [a, b] of [[11, 12], [13, 14], [15, 16], [23, 24]]) {
     const A = P2(a), B = P2(b);
     if (st.raw && st.raw[a] && st.raw[b]) {
       const keep = d(A, st.raw[a]) + d(B, st.raw[b]), swap = d(A, st.raw[b]) + d(B, st.raw[a]);
-      if (swap < keep * 0.5 && keep > 0.04 * W) st.flip[a] = !st.flip[a];   // KI hat in diesem Bild getauscht
+      if (swap < keep * 0.4 && keep > 0.05 * W) st.flip[a] = st.flip[a] ? 0 : now;   // Tausch an / wieder aus
     }
-    // Notbremse: Zuordnung muss zur Armlänge passen (Ellbogen ↔ Schulter, Handgelenk ↔ Ellbogen)
-    const aL = ownA != null ? P2(ownA) : P2(map[13] ? 14 : 13);
-    const aR = ownB != null ? P2(ownB) : P2(map[13] ? 13 : 14);
-    const [X, Y] = st.flip[a] ? [B, A] : [A, B];             // X gehört gerade zu links, Y zu rechts
-    const cur = d(X, aL) + d(Y, aR), alt = d(X, aR) + d(Y, aL);
-    if (alt < cur * 0.5) st.flip[a] = !st.flip[a];
+    if (st.flip[a] && now - st.flip[a] > 15) st.flip[a] = 0;   // nach ~0,5 s wieder der KI vertrauen
     if (st.flip[a]) { map[a] = b; map[b] = a; }
   }
   st.raw = {};
-  for (const i of [13, 14, 15, 16]) st.raw[i] = P2(i);
+  for (const i of [11, 12, 13, 14, 15, 16, 23, 24]) st.raw[i] = P2(i);
   const swapped = Object.keys(map).length > 0;
   const J = i => map[i] ?? i;
 
@@ -441,9 +431,16 @@ class PunchArm {
     const P = this.pending; this.pending = null;
     // Richtungs-Anteil der Schlaggeschwindigkeit: 1 = rein nach oben, 0 = rein nach vorne
     const upShare = P.vUp > 0 || P.vFwd > 0 ? Math.max(0, P.vUp) / (Math.max(0, P.vUp) + Math.max(0, P.vFwd) || 1) : 0;
+    // Armhaltung im Treffpunkt: Median über alle Bilder nahe der weitesten Stelle (robust gegen Rauschen,
+    // auch wenn der Schlag nur 2–3 Bilder lang in Endposition ist)
+    const top = P.frames.filter(f => f.D >= P.D * 0.8);
+    if (top.length >= 2) for (const k of FEAT_KEYS) {
+      if (P.feat[k] == null || top[0].side[k] == null) continue;
+      P.feat[k] = median(top.map(f => f.side[k]));
+    }
     const feat = { ...P.feat, upGain: P.up, fwdGain: P.fw, upShare, gain: P.gain };
     this.lastFeat = feat;
-    return { kind: "type", feat };
+    return { kind: "type", feat, suspect: !!P.suspect };
   }
   recent() {   // Anzeige: höchste Weite der letzten 1,5 s (1 = reicht)
     let r = 0;
@@ -499,7 +496,7 @@ class PunchArm {
     }
     const G = dP(p, this.guard) / sw;     // Abstand von der Deckung in Schulterbreiten
 
-    this.buf.push({ t, G, u: p.u, f: p.f });
+    this.buf.push({ t, G, u: p.u, f: p.f, p });
     while (this.buf.length && t - this.buf[0].t > 450) this.buf.shift();
     let base = Infinity;
     for (const b of this.buf) base = Math.min(base, b.G);
@@ -515,7 +512,12 @@ class PunchArm {
       P.uMin = Math.min(P.uMin, p.u); P.fMin = Math.min(P.fMin, p.f);
       P.up = Math.max(P.up, (p.u - P.uMin) / sw); P.fw = Math.max(P.fw, (p.f - P.fMin) / sw);
       P.vUp = Math.max(P.vUp, vUp); P.vFwd = Math.max(P.vFwd, vFwd);
-      if (G > P.G) { P.G = G; P.feat = snap(); }
+      // Armhaltung dort messen, wo die Faust am weitesten vom STARTPUNKT der Bewegung weg ist
+      // (bei schnellen Kombis startet z. B. der Haken, bevor die Faust nach dem Jab zurück in der Deckung ist)
+      const fromStart = dP(p, P.startP) / sw;
+      if (fromStart > P.D) { P.D = fromStart; P.feat = snap(); }
+      P.frames.push({ D: fromStart, side });
+      if (G > P.G) P.G = G;
       P.gain = Math.max(P.gain, G - P.base);
       const age = t - P.t0;
       if (age >= 300 || (age >= 180 && G < P.G * 0.5)) out.push(this.finishPending());
@@ -531,9 +533,13 @@ class PunchArm {
         this.prevFiredAt = this.firedAt;
         this.armed = false; this.peak = G; this.firedAt = t; this.count++;
         this.lastStrength = (G - base) / rise;          // wie deutlich die Schwelle überschritten wurde
-        let uMin = Infinity, fMin = Infinity;
-        for (const b of this.buf) { uMin = Math.min(uMin, b.u); fMin = Math.min(fMin, b.f); }
+        let uMin = Infinity, fMin = Infinity, startP = p, gMin = Infinity;
+        for (const b of this.buf) {
+          uMin = Math.min(uMin, b.u); fMin = Math.min(fMin, b.f);
+          if (b.G < gMin && b.p) { gMin = b.G; startP = b.p; }       // Startpunkt = ruhigster Punkt vor dem Schlag
+        }
         this.pending = { t0: t, G, feat: snap(), uMin, fMin, up: (p.u - uMin) / sw, fw: (p.f - fMin) / sw, base, gain: G - base,
+                         startP, D: dP(p, startP) / sw, frames: [{ D: dP(p, startP) / sw, side }],
                          vUp: Math.max(vUp, this.lastVUp || 0), vFwd: Math.max(vFwd, this.lastVFwd || 0) };
         out.push({ kind: "hit" });
       }
@@ -542,7 +548,7 @@ class PunchArm {
       // wieder bereit, sobald die Faust deutlich zurückkommt (oder nach 1,2 s)
       if ((this.peak - G >= rise * 0.35 && t - this.firedAt > 100) || t - this.firedAt > 1200) {
         this.armed = true;
-        this.buf = [{ t, G, u: p.u, f: p.f }];
+        this.buf = [{ t, G, u: p.u, f: p.f, p }];
       }
     }
     return out;
@@ -582,6 +588,11 @@ function classifyPunch(feat, hand, calib) {
 // Kalibrierung auswerten: samples = [{ hand, type, feat }]
 // Ergebnis: Mittelwerte je Hand & Schlagart + persönliche Schwelle je Hand
 function buildCalibration(samples) {
+  // Proben mit Sprungwerten (KI hat kurz Körperseiten vertauscht) aussortieren: Weite > 2,2 × Median der Hand
+  samples = samples.filter(s => {
+    const gs = samples.filter(x => x.hand === s.hand).map(x => x.feat.G);
+    return s.feat.G <= 2.2 * median(gs);
+  });
   const cal = { L: {}, R: {}, rise: {} };
   for (const hand of ["L", "R"]) {
     for (const ty of PTYPES) {
@@ -630,11 +641,20 @@ class PunchCounter {
         if (ev.kind === "hit") {
           const other = this[k === "L" ? "R" : "L"];
           // beide Hände im selben Moment = KI hat Hände vertauscht → nur einmal zählen
-          if (t - other.firedAt < 90) { this[k].cancelFire(); continue; }
+          if (t - other.firedAt < 15) { this[k].cancelFire(); continue; }   // im selben Bild = KI-Tausch
           // Mitbewegung: Beim Jab zuckt die hintere Hand oft mit (Körperdrehung). Kommt eine Bewegung
           // kurz (< 0,2 s) nach einem Schlag der anderen Hand und ist nur knapp über der Schwelle → kein Schlag
-          if (t - other.firedAt < 200 && this[k].lastStrength < 1.4) { this[k].cancelFire(); continue; }
+          // Entscheidung erst am Ende der Bewegung (ein schneller Cross ist dann gestreckt / weit genug)
+          if (t - other.firedAt < 200 && this[k].pending) this[k].pending.suspect = true;
           if (!this.first) this.first = t;
+        } else if (ev.kind === "type" && ev.suspect) {
+          // war nur Mitbewegung: kaum über der Schwelle und Arm nicht gestreckt → Zählung zurücknehmen
+          const f = ev.feat, strength = (f.gain ?? 0) / ((this[k].rise || S.rise) * (S.riseScale || 1));
+          if (strength < 1.4 && Math.max(f.ext3, f.ext2) < 0.85) {
+            this[k].count = Math.max(0, this[k].count - 1);
+            events.push({ k, kind: "undo" });
+            continue;
+          }
         }
         events.push({ k, ...ev });
       }
@@ -751,7 +771,7 @@ function logFrame(t, ex, evs) {
     if (!s) return ",,,,";
     return [f2(box[k].sig), f2(s.ext3), f2(s.ext2), f2(s.v), box[k].armed ? 1 : 0].join(",");
   };
-  const evStr = evs.map(e => e.kind === "hit" ? e.k : e.k.toLowerCase()).join("");
+  const evStr = evs.map(e => e.kind === "hit" ? e.k : e.kind === "undo" ? "x" : e.k.toLowerCase()).join("");
   LOG.push(`${Math.round(t)},${f2(ex.sw)},${arm("L")},${arm("R")},${ex.swapped ? 1 : 0},${evStr}`);
   while (LOG.length > 600) LOG.shift();      // ca. 20 s
 }
@@ -762,7 +782,7 @@ function logPunch(t, hand, code, feat) {
 }
 function buildReport() {
   return [
-    `KI-Trainer Messprotokoll v8.6 · ${new Date().toLocaleString("de-DE")}`,
+    `KI-Trainer Messprotokoll v8.7 · ${new Date().toLocaleString("de-DE")}`,
     `Modell ${S.model} · FPS ${fps} · Auslage ${S.stance} · Schwelle ${S.rise} · Kalibrierung ${calib ? `ja (L ${f2(calib.rise.L)} R ${f2(calib.rise.R)})` : "nein"}`,
     `Gezählt: L ${box.L.count} · R ${box.R.count} · Typen ${JSON.stringify(typeCount)} · Deckung gefallen L ${guardDrops.L} R ${guardDrops.R}`,
     ...(calib && calib.samples ? [`--- Kalibrier-Proben (Hand Art Weite | ${FEAT_KEYS.join(" ")}) ---`,
@@ -886,6 +906,7 @@ function updateBox(lm, wl) {
   const evs = box.update(ex.sw, ex.sides, now, S);
   for (const ev of evs) {
     if (ev.kind === "hit") beep(ev.k === "L" ? 620 : 900, 0.06);
+    else if (ev.kind === "undo") PLOG.push(`${Math.round(now)} ${ev.k} – verworfen (Mitbewegung der anderen Hand)`);
     else onTypedPunch(ev.k, ev.feat, now);
   }
   logFrame(now, ex, evs);
@@ -949,6 +970,7 @@ function calibSample(hand, feat) {
   const code = CAL_STEPS[calibState.step];
   if (hand !== handOfCode(code)) return;        // andere Hand ignorieren
   const type = code <= 2 ? "straight" : code <= 4 ? "hook" : "upper";
+  if (feat.G > 3.5) { feedback("Nicht erkannt – bitte nochmal", true); return; }   // Sprungwert → nicht verwenden
   calibState.samples.push({ hand, type, feat });
   calibState.got++;
   beep(1100, 0.08, 0.25);
