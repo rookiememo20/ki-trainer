@@ -91,7 +91,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>🥊 KI-Trainer <span class="ver">v8.2 · Push-ups & Schläge zählen</span></h1>
+  <h1>🥊 KI-Trainer <span class="ver">v8.3 · Push-ups & Schläge zählen</span></h1>
 
   <div class="tabs">
     <button class="tab active" data-mode="pushup">💪 Push-ups</button>
@@ -461,6 +461,7 @@ class PunchArm {
       if (G - base >= rise && t - this.firedAt > 140) {
         if (this.pending) { out.push({ kind: "type", feat: this.pending.feat }); this.pending = null; }
         this.armed = false; this.peak = G; this.firedAt = t; this.count++;
+        this.lastStrength = (G - base) / rise;          // wie deutlich die Schwelle überschritten wurde
         this.pending = { t0: t, G, feat: snap() };
         out.push({ kind: "hit" });
       }
@@ -479,6 +480,8 @@ class PunchArm {
 // Schlagart bestimmen. calib = gelernte Mittelwerte je Hand und Art (aus der Kalibrierung) oder null
 const PTYPES = ["straight", "hook", "upper"];
 function classifyPunch(feat, hand, calib) {
+  // Arm hängt nach unten (Oberarm senkrecht runter, Unterarm nicht hoch) = Hände runtergenommen, kein Schlag
+  if (feat.uaU < -0.75 && feat.faUp < 0.2) return "none";
   if (calib && calib[hand]) {
     let best = null, bestD = Infinity;
     for (const ty of PTYPES) {
@@ -537,6 +540,9 @@ class PunchCounter {
           const other = this[k === "L" ? "R" : "L"];
           // beide Hände im selben Moment = KI hat Hände vertauscht → nur einmal zählen
           if (t - other.firedAt < 90) { this[k].count--; this[k].pending = null; continue; }
+          // Mitbewegung: Beim Jab zuckt die hintere Hand oft mit (Körperdrehung). Kommt eine Bewegung
+          // kurz (< 0,2 s) nach einem Schlag der anderen Hand und ist nur knapp über der Schwelle → kein Schlag
+          if (t - other.firedAt < 200 && this[k].lastStrength < 1.4) { this[k].count--; this[k].pending = null; continue; }
           if (!this.first) this.first = t;
         }
         events.push({ k, ...ev });
@@ -666,6 +672,8 @@ function buildReport() {
     `KI-Trainer Messprotokoll v8 · ${new Date().toLocaleString("de-DE")}`,
     `Modell ${S.model} · FPS ${fps} · Auslage ${S.stance} · Schwelle ${S.rise} · Kalibrierung ${calib ? `ja (L ${f2(calib.rise.L)} R ${f2(calib.rise.R)})` : "nein"}`,
     `Gezählt: L ${box.L.count} · R ${box.R.count} · Typen ${JSON.stringify(typeCount)}`,
+    ...(calib && calib.samples ? [`--- Kalibrier-Proben (Hand Art Weite | ${FEAT_KEYS.join(" ")}) ---`,
+        ...calib.samples.map(x => `${x.hand} ${x.type.padEnd(8)} G ${f2(x.G)} | ${x.f.map(f2).join(" ")}`)] : []),
     `--- Schläge (Zeit Hand Nr Name Weite Streckung3D/2D Unterarm(vor,quer,hoch) Oberarm(vor,quer,hoch)) ---`, ...PLOG,
     `--- Frames: t,sw,L_sig,L_e3,L_e2,L_vis,L_armed,R_sig,R_e3,R_e2,R_vis,R_armed,swap,events(L/R=Treffer,l/r=Typ) ---`,
     ...LOG
@@ -789,8 +797,13 @@ function updateBox(lm, wl) {
 }
 let nameTimer = null;
 function onTypedPunch(hand, feat, t) {
-  if (calibState) { calibSample(hand, feat); return; }
   const type = classifyPunch(feat, hand, calib);
+  if (type === "none") {                               // Hände runtergenommen → Zählung zurücknehmen
+    box[hand].count = Math.max(0, box[hand].count - 1);
+    PLOG.push(`${Math.round(t)} ${hand} – verworfen (Hand runtergenommen) ua(${f2(feat.uaF)},${f2(feat.uaIn)},${f2(feat.uaU)}) fa(${f2(feat.faF)},${f2(feat.faIn)},${f2(feat.faUp)})`);
+    return;
+  }
+  if (calibState) { calibSample(hand, feat); return; }
   const code = punchCode(type, hand, leadHand());
   typeCount[code]++;
   lastPunch[hand] = { code, feat };
@@ -842,6 +855,7 @@ function calibSample(hand, feat) {
 function finishCalibration() {
   calib = buildCalibration(calibState.samples);
   calib.date = new Date().toLocaleString("de-DE");
+  calib.samples = calibState.samples.map(x => ({ hand: x.hand, type: x.type, f: FEAT_KEYS.map(k => +x.feat[k].toFixed(2)), G: +x.feat.G.toFixed(2) }));
   try { localStorage.setItem("boxCalib", JSON.stringify(calib)); } catch (e) {}
   stopCalibration(false);
   applyCalib();
