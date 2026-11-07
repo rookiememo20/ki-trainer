@@ -69,6 +69,8 @@
   .tips b{color:var(--text)}
   select{background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px}
   .hidden{display:none !important}
+  .warnbox{position:absolute;left:10px;top:10px;max-width:46%;background:rgba(127,29,29,.85);color:#fff;
+    border-radius:10px;padding:8px 10px;font-size:.85rem;font-weight:700;line-height:1.35;pointer-events:none}
   .coach{position:absolute;left:50%;top:52%;transform:translate(-50%,-50%);text-align:center;pointer-events:none;
     background:rgba(0,0,0,.6);border-radius:18px;padding:14px 22px;max-width:92%}
   .coach .c1{font-size:clamp(2rem,9vw,4.5rem);font-weight:900;line-height:1.05;color:#fff;letter-spacing:.02em}
@@ -81,7 +83,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>🥊 KI-Trainer <span class="ver">v8 · Push-ups & Schläge zählen</span></h1>
+  <h1>🥊 KI-Trainer <span class="ver">v8.1 · Push-ups & Schläge zählen</span></h1>
 
   <div class="tabs">
     <button class="tab active" data-mode="pushup">💪 Push-ups</button>
@@ -95,6 +97,7 @@
     <div class="hud"><div class="big" id="bigCount">0</div><div class="biglabel" id="bigLabel">Push-ups</div></div>
     <div class="depth" id="depth"><div id="depthFill" style="height:0%"></div></div>
     <div class="feedback" id="feedback"></div>
+    <div class="warnbox hidden" id="warnbox"></div>
     <div class="coach hidden" id="coach"><div class="c1" id="coachBig"></div><div class="c2" id="coachSmall"></div></div>
     <div class="countdown hidden" id="countdown"><div class="n" id="cdNum">5</div><div class="t">Geh in Position – gleich wird gezählt</div></div>
   </div>
@@ -241,7 +244,7 @@
     <summary>💡 So stellst du die Kamera auf</summary>
     <div class="tips">
       <p><b>Push-ups:</b> Handy <b>quer</b> auf den Boden stellen (z. B. an eine Flasche gelehnt), <b>seitlich</b> von dir, ca. 1,5–2 m weg. Dein ganzer Körper von Kopf bis Füße muss im Bild sein. Von vorne geht auch, dann das Handy ca. 1,5 m vor deinen Kopf stellen, sodass Schultern und Hände gut zu sehen sind.</p>
-      <p><b>Boxen:</b> Handy auf Brust- bis Kopfhöhe, 2–3 m entfernt, <b>schräg von vorne (ca. 45°)</b> – nicht genau frontal, sonst sieht die Kamera den hinteren Arm schlecht. Kopf, Oberkörper, <b>Hüfte</b> und beide Fäuste müssen immer im Bild sein, auch bei ausgestrecktem Arm. Danach einmal <b>🎯 Kalibrieren</b> – dann erkennt die App deine Schlagarten deutlich besser.</p>
+      <p><b>Boxen:</b> Handy auf Brust- bis Kopfhöhe, 2–3 m entfernt. Stell dich in deine Auslage und dreh dich so, dass die Kamera <b>deine Brust sieht</b> und <b>beide Fäuste</b> frei sind – die Kamera steht also eher vor deiner <b>Schlaghand-Seite</b> (bei Orthodox: rechts vor dir). <b>Nicht seitlich (im Profil) zur Kamera stehen</b>, sonst verdeckt dein Körper die hintere Hand. Kopf, Oberkörper, Hüfte und beide Fäuste müssen immer im Bild sein, auch bei ausgestrecktem Arm. Danach einmal <b>🎯 Kalibrieren</b>. Wenn etwas nicht passt, erscheint oben links im Bild eine rote Warnung.</p>
       <p><b>Allgemein:</b> Helles Licht von vorne (nicht Gegenlicht vom Fenster), ruhiger Hintergrund, eher enge Kleidung. Die Erkennung läuft komplett auf deinem Handy, es wird kein Video hochgeladen.</p>
     </div>
   </details>
@@ -743,9 +746,27 @@ function updatePush(lm) {
 }
 
 // ---------- Boxen ----------
+// Haltung zur Kamera prüfen: Stehst du zu seitlich, verdeckt dein Körper die hintere Hand.
+const posCheck = { swMax: null, narrowSince: null, missSince: { L: null, R: null } };
+function checkPosition(ex, now) {
+  posCheck.swMax = posCheck.swMax == null ? ex.sw : Math.max(ex.sw, posCheck.swMax * 0.9995);
+  const since = (key, cond) => cond ? (posCheck[key] ?? (posCheck[key] = now)) : (posCheck[key] = null);
+  const warn = [];
+  const n0 = since("narrowSince", ex.sw < 0.72 * posCheck.swMax);
+  if (n0 != null && now - n0 > 900) warn.push("Du stehst zu seitlich zur Kamera – Brust etwas mehr zur Kamera drehen");
+  for (const k of ["L", "R"]) {
+    const m = ex.sides[k] ? (posCheck.missSince[k] = null) : (posCheck.missSince[k] ?? (posCheck.missSince[k] = now));
+    if (m != null && now - m > 900) warn.push(`${k === "L" ? "Linke" : "Rechte"} Faust nicht sichtbar – sie ist verdeckt oder außerhalb des Bildes`);
+  }
+  const el = $("warnbox");
+  if (warn.length) { el.innerHTML = "⚠️ " + warn.join("<br>⚠️ "); el.classList.remove("hidden"); }
+  else el.classList.add("hidden");
+  return warn;
+}
 function updateBox(lm, wl) {
   const now = performance.now();
   const ex = extractSides(lm, wl, canvas.width, canvas.height, swapState);
+  checkPosition(ex, now);
   const evs = box.update(ex.sw, ex.sides, now, S);
   for (const ev of evs) {
     if (ev.kind === "hit") beep(ev.k === "L" ? 620 : 900, 0.06);
@@ -1068,6 +1089,7 @@ function stop() {
   cdEnd = 0; $("countdown").classList.add("hidden");
   if (combo.active) stopCombo();
   if (calibState) stopCalibration(true);
+  $("warnbox").classList.add("hidden");
   setStatus("Gestoppt."); render();
 }
 
@@ -1088,6 +1110,7 @@ document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () =>
   $("boxSettings").classList.toggle("hidden", isPush);
   if (combo.active) stopCombo();
   if (calibState) stopCalibration(true);
+  $("warnbox").classList.add("hidden");
   resetLive(); render();
 }));
 
