@@ -69,11 +69,19 @@
   .tips b{color:var(--text)}
   select{background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px}
   .hidden{display:none !important}
+  .coach{position:absolute;left:50%;top:52%;transform:translate(-50%,-50%);text-align:center;pointer-events:none;
+    background:rgba(0,0,0,.6);border-radius:18px;padding:14px 22px;max-width:92%}
+  .coach .c1{font-size:clamp(2rem,9vw,4.5rem);font-weight:900;line-height:1.05;color:#fff;letter-spacing:.02em}
+  .coach .c2{font-size:clamp(.95rem,3vw,1.25rem);font-weight:700;color:var(--warn);margin-top:6px}
+  .coach.good .c1{color:var(--accent)} .coach.bad .c1{color:#f87171} .coach.mid .c1{color:var(--warn)}
+  .section{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:10px 0}
+  .section h3{margin:0 0 8px;font-size:1rem}
+  .card .v.small{font-size:1.3rem}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>🥊 KI-Trainer <span class="ver">v7.1 · Push-ups & Schläge zählen</span></h1>
+  <h1>🥊 KI-Trainer <span class="ver">v8 · Push-ups & Schläge zählen</span></h1>
 
   <div class="tabs">
     <button class="tab active" data-mode="pushup">💪 Push-ups</button>
@@ -87,6 +95,7 @@
     <div class="hud"><div class="big" id="bigCount">0</div><div class="biglabel" id="bigLabel">Push-ups</div></div>
     <div class="depth" id="depth"><div id="depthFill" style="height:0%"></div></div>
     <div class="feedback" id="feedback"></div>
+    <div class="coach hidden" id="coach"><div class="c1" id="coachBig"></div><div class="c2" id="coachSmall"></div></div>
     <div class="countdown hidden" id="countdown"><div class="n" id="cdNum">5</div><div class="t">Geh in Position – gleich wird gezählt</div></div>
   </div>
 
@@ -121,15 +130,61 @@
       <div class="card"><div class="v" id="bRate">–</div><div class="k">Schläge / Minute</div></div>
       <div class="card"><div class="v" id="bRound">–</div><div class="k" id="bRoundLabel">Runde</div></div>
     </div>
+    <div class="stats">
+      <div class="card"><div class="v small" id="t1">0</div><div class="k">1 · Jab</div></div>
+      <div class="card"><div class="v small" id="t2">0</div><div class="k">2 · Cross</div></div>
+      <div class="card"><div class="v small" id="t34">0 · 0</div><div class="k">3 · 4 · Haken (Führ · Schlag)</div></div>
+      <div class="card"><div class="v small" id="t56">0 · 0</div><div class="k">5 · 6 · Uppercut (Führ · Schlag)</div></div>
+    </div>
     <div class="bars">
       <div class="bar"><span style="width:62px;color:var(--left)">Links</span><div class="track"><div class="fill" id="sigL" style="background:var(--left)"></div><div class="mark"></div></div></div>
       <div class="bar"><span style="width:62px;color:var(--right)">Rechts</span><div class="track"><div class="fill" id="sigR" style="background:var(--right)"></div><div class="mark"></div></div></div>
     </div>
     <div class="card tips" id="diag" style="margin-bottom:10px">
-      <b>Messwerte letzte Bewegung</b> (✅ = reicht für einen Schlag)<br>
+      <b>Letzter Schlag</b> (Balken am weißen Strich = Schlag zählt)<br>
       <span style="color:var(--left)">Links:</span> <span id="dL">–</span><br>
       <span style="color:var(--right)">Rechts:</span> <span id="dR">–</span>
     </div>
+
+    <div class="section">
+      <h3>🎙 Kombi-Trainer</h3>
+      <div class="tips" style="margin-bottom:8px">Die App sagt eine Kombination an (z. B. „1 – 2 – 3“), du schlägst sie, die App prüft sie. Nummern: <b>1</b> Jab · <b>2</b> Cross · <b>3</b> Führhand-Haken · <b>4</b> Schlaghand-Haken · <b>5</b> Führhand-Uppercut · <b>6</b> Schlaghand-Uppercut.</div>
+      <div class="controls" style="margin:6px 0">
+        <select id="cLevel">
+          <option value="1">Anfänger (1–2 Schläge)</option>
+          <option value="2" selected>Mittel (2–4 Schläge)</option>
+          <option value="3">Profi (4–6 Schläge)</option>
+          <option value="4">Nur gerade (1 & 2)</option>
+        </select>
+        <select id="cPause">
+          <option value="1.5">kurze Pause (1,5 s)</option>
+          <option value="2.5" selected>normale Pause (2,5 s)</option>
+          <option value="4">lange Pause (4 s)</option>
+        </select>
+        <select id="cCall">
+          <option value="num" selected>Ansage: Zahlen</option>
+          <option value="name">Ansage: Namen</option>
+        </select>
+        <button class="btn primary" id="comboBtn">▶ Kombi-Trainer starten</button>
+      </div>
+      <div class="stats" style="margin:6px 0 0">
+        <div class="card"><div class="v small" id="cN">0</div><div class="k">Kombis</div></div>
+        <div class="card"><div class="v small" style="color:var(--accent)" id="cPerfect">0</div><div class="k">sauber</div></div>
+        <div class="card"><div class="v small" style="color:var(--warn)" id="cHands">0</div><div class="k">Hände richtig</div></div>
+        <div class="card"><div class="v small" id="cRate">–</div><div class="k">Trefferquote</div></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>🎯 Kalibrierung</h3>
+      <div class="tips" id="calInfo">Noch nicht kalibriert. Die App nutzt allgemeine Regeln.</div>
+      <div class="tips" style="margin-top:6px">Dauert ca. 1 Minute: Du schlägst je 3× Jab, Cross, beide Haken und beide Uppercuts. Danach kennt die App <b>deine</b> Schläge und deinen Kamerawinkel. Nach dem Umstellen der Kamera neu kalibrieren.</div>
+      <div class="controls" style="margin:8px 0 0">
+        <button class="btn primary" id="calBtn">🎯 Kalibrieren</button>
+        <button class="btn" id="calDelBtn">🗑 Kalibrierung löschen</button>
+      </div>
+    </div>
+
     <div class="controls">
       <select id="roundLen">
         <option value="60">1:00 Runde</option>
@@ -169,10 +224,16 @@
       <div class="tips">Die App misst zwei Dinge: den Ellbogenwinkel und wie hoch deine Schultern über den Händen sind. Sie nimmt automatisch das Signal, das sich bei dir stärker bewegt. Der gelbe Balken rechts im Bild zeigt die Tiefe: ganz voll = unten erkannt.</div>
     </div>
     <div id="boxSettings" class="hidden">
-      <div class="row"><label>Schlagweite (weniger = empfindlicher)</label><input type="range" id="sRise" min="0.20" max="1.20" step="0.01" value="0.40"><output id="oRise">0.40</output></div>
-      <div class="row"><label>Mindest-Armstreckung (weniger = empfindlicher)</label><input type="range" id="sMinExt" min="0.45" max="0.95" step="0.01" value="0.62"><output id="oMinExt">0.62</output></div>
-      <div class="tips">Ein Schlag zählt nur, wenn <b>beides</b> erfüllt ist: Die Hand schießt schnell weit genug nach vorne (<b>Schlagweite</b>) und der Arm ist dabei gestreckt genug (<b>Armstreckung</b>, 1 = ganz gestreckt, Deckung ≈ 0,4). Die Balken zeigen live, wie nah du dran bist. Erreicht ein Balken den weißen Strich, zählt der Schlag.<br>
-      <b>Zählt bei kleinen Bewegungen:</b> beide Werte größer machen. <b>Haken/Schläge fehlen:</b> Armstreckung kleiner machen (Haken ≈ 0,65–0,75).</div>
+      <div class="row"><label>Auslage</label>
+        <select id="sStance">
+          <option value="orthodox" selected>Orthodox (linke Führhand)</option>
+          <option value="southpaw">Rechtsauslage (rechte Führhand)</option>
+        </select>
+      </div>
+      <div class="row"><label>Schlagschwelle (weniger = empfindlicher)</label><input type="range" id="sRise" min="0.40" max="1.40" step="0.01" value="0.75"><output id="oRise">0.75</output></div>
+      <div class="tips">Gemessen wird, wie weit sich <b>Faust und Ellbogen</b> aus deiner Deckung bewegen – relativ zu deinem Oberkörper. Kopfbewegungen, Abtauchen und Eindrehen zählen deshalb nicht. Erreicht ein Balken den weißen Strich, zählt der Schlag.<br>
+      Nach einer <b>Kalibrierung</b> hat jede Hand ihre eigene Schwelle – dann wirkt dieser Regler nur noch, wenn du die Kalibrierung löschst.<br>
+      <b>Zählt bei kleinen Bewegungen:</b> Schwelle höher. <b>Schläge fehlen:</b> Schwelle niedriger oder kalibrieren.</div>
     </div>
   </details>
 
@@ -180,7 +241,7 @@
     <summary>💡 So stellst du die Kamera auf</summary>
     <div class="tips">
       <p><b>Push-ups:</b> Handy <b>quer</b> auf den Boden stellen (z. B. an eine Flasche gelehnt), <b>seitlich</b> von dir, ca. 1,5–2 m weg. Dein ganzer Körper von Kopf bis Füße muss im Bild sein. Von vorne geht auch, dann das Handy ca. 1,5 m vor deinen Kopf stellen, sodass Schultern und Hände gut zu sehen sind.</p>
-      <p><b>Boxen:</b> Handy auf Brust- bis Kopfhöhe, 2–3 m entfernt. Am besten <b>schräg von vorne (ca. 45°)</b>, nicht genau frontal. Kopf, Oberkörper und beide Hände müssen immer im Bild sein, auch wenn der Arm ausgestreckt ist.</p>
+      <p><b>Boxen:</b> Handy auf Brust- bis Kopfhöhe, 2–3 m entfernt, <b>schräg von vorne (ca. 45°)</b> – nicht genau frontal, sonst sieht die Kamera den hinteren Arm schlecht. Kopf, Oberkörper, <b>Hüfte</b> und beide Fäuste müssen immer im Bild sein, auch bei ausgestrecktem Arm. Danach einmal <b>🎯 Kalibrieren</b> – dann erkennt die App deine Schlagarten deutlich besser.</p>
       <p><b>Allgemein:</b> Helles Licht von vorne (nicht Gegenlicht vom Fenster), ruhiger Hintergrund, eher enge Kleidung. Die Erkennung läuft komplett auf deinem Handy, es wird kein Video hochgeladen.</p>
     </div>
   </details>
@@ -249,93 +310,237 @@ class PushCounter {
   }
 }
 
-// Schläge (pro Arm): D = Abstand Kopf/Schulter→Hand in Schulterbreiten, ext = Armstreckung (0..1).
-// Ein Schlag = D steigt schnell um mindestens "rise" an UND der Arm ist dabei wirklich gestreckt.
-const median3 = a => a.length < 3 ? a[a.length - 1] : [...a].sort((x, y) => x - y)[1];
+// ---------- Schläge ----------
+// Idee: Die Position der Faust wird relativ zur EIGENEN Schulter und im Koordinatensystem
+// des OBERKÖRPERS gemessen (vorne / quer zur Körpermitte / oben). Kopfbewegungen, Abtauchen
+// und Eindrehen verändern diese Werte kaum – nur echte Armbewegungen.
+// Ein Schlag = die Faust entfernt sich schnell von ihrer Deckungs-Position.
+// Die Schlagart ergibt sich aus Richtung, Unterarm-Haltung und Armstreckung im Treffpunkt.
+const vsub = (a, b) => ({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z });
+const vadd = (a, b) => ({ x: a.x + b.x, y: a.y + b.y, z: a.z + b.z });
+const vscale = (a, k) => ({ x: a.x * k, y: a.y * k, z: a.z * k });
+const vdot = (a, b) => a.x * b.x + a.y * b.y + a.z * b.z;
+const vcross = (a, b) => ({ x: a.y * b.z - a.z * b.y, y: a.z * b.x - a.x * b.z, z: a.x * b.y - a.y * b.x });
+const vlen = a => Math.hypot(a.x, a.y, a.z);
+const vnorm = a => vscale(a, 1 / (vlen(a) || 1));
+const median = a => { const b = [...a].sort((x, y) => x - y); return b[Math.floor(b.length / 2)]; };
+
+// Oberkörper-Achsen: f = Brust nach vorne, l = nach links (Sicht der Person), u = nach oben
+function torsoFrame(wl, J) {
+  const shM = vscale(vadd(wl[J(11)], wl[J(12)]), 0.5), hipM = vscale(vadd(wl[J(23)], wl[J(24)]), 0.5);
+  let u = vsub(shM, hipM);
+  u = vlen(u) < 0.15 ? { x: 0, y: -1, z: 0 } : vnorm(u);
+  const s = vsub(wl[J(11)], wl[J(12)]);
+  const l = vnorm(vsub(s, vscale(u, vdot(s, u))));
+  return { f: vcross(l, u), l, u };
+}
+
+// Aus den KI-Punkten die Messwerte pro Arm berechnen.
+// lm = Bildpunkte (0..1), wl = 3D-Punkte (Meter), W/H = Bildgröße, st = Zustand für Tausch-Erkennung
+function extractSides(lm, wl, W, H, st) {
+  const P2 = i => ({ x: lm[i].x * W, y: lm[i].y * H });
+  const visI = i => lm[i].visibility ?? 1;
+  // 1) Vertauschte linke/rechte Punkte korrigieren (jedes Paar einzeln, über die Position im letzten Bild)
+  const map = {};
+  let swapped = false;
+  for (const [a, b] of [[11, 12], [13, 14], [15, 16], [23, 24]]) {
+    if (st.prev && st.prev[a] && st.prev[b]) {
+      const A = P2(a), B = P2(b), d = (p, q) => Math.hypot(p.x - q.x, p.y - q.y);
+      const keep = d(A, st.prev[a]) + d(B, st.prev[b]);
+      const swap = d(A, st.prev[b]) + d(B, st.prev[a]);
+      if (swap < keep * 0.5 && keep > 0.04 * W) { map[a] = b; map[b] = a; swapped = true; }
+    }
+  }
+  const J = i => map[i] ?? i;
+  st.prev = {};
+  for (const i of [11, 12, 13, 14, 15, 16, 23, 24]) st.prev[i] = P2(J(i));
+
+  const F = torsoFrame(wl, J);
+  const sw = Math.max(0.15, vlen(vsub(wl[J(11)], wl[J(12)])));
+  const sides = {};
+  for (const [k, s, e, w, sign] of [["L", 11, 13, 15, -1], ["R", 12, 14, 16, 1]]) {
+    const S_ = J(s), E_ = J(e), W_ = J(w);
+    if (visI(W_) < 0.2) continue;
+    const toT = v => ({ f: vdot(v, F.f), in: sign * vdot(v, F.l), u: vdot(v, F.u) });   // in Oberkörper-Achsen
+    const rel = vsub(wl[W_], wl[S_]);                        // Faust relativ zur eigenen Schulter
+    const p = toT(rel);
+    const pe = toT(vsub(wl[E_], wl[S_]));                    // Ellbogen relativ zur eigenen Schulter
+    const fa = vnorm(vsub(wl[W_], wl[E_]));                  // Unterarm-Richtung
+    const ua = toT(vnorm(vsub(wl[E_], wl[S_])));             // Oberarm-Richtung
+    const ext3 = vlen(rel) / ((vlen(vsub(wl[S_], wl[E_])) + vlen(vsub(wl[E_], wl[W_]))) || 1);
+    const d2 = (i, j) => { const A = P2(i), B = P2(j); return Math.hypot(A.x - B.x, A.y - B.y); };
+    const ext2 = d2(S_, W_) / ((d2(S_, E_) + d2(E_, W_)) || 1);
+    sides[k] = {
+      p, pe, ext3, ext2, uaF: ua.f, uaIn: ua.in, uaU: ua.u,
+      faF: vdot(fa, F.f), faIn: sign * vdot(fa, F.l), faUp: vdot(fa, F.u),
+      v: Math.min(visI(S_), visI(E_), visI(W_)),
+      pos: { x: lm[W_].x, y: lm[W_].y }
+    };
+  }
+  return { sw, sides, swapped };
+}
+
+const FEAT_KEYS = ["ext3", "ext2", "faF", "faIn", "faUp", "uaF", "uaIn", "uaU"];
 class PunchArm {
   constructor() { this.reset(); }
   reset() {
     this.count = 0; this.armed = true; this.buf = []; this.peak = 0; this.firedAt = -1e9;
-    this.sig = 0; this.rawD = []; this.rawE = []; this.ext = 0; this.diag = [];
+    this.sig = 0; this.raw = []; this.guard = null; this.stillSince = null;
+    this.prevP = null; this.prevT = null; this.pending = null; this.diag = []; this.lastFeat = null;
   }
-  recent() {   // für die Anzeige: höchste Weite (1 = genug) und Streckung der letzten 1,5 s
-    let r = 0, e = 0;
-    for (const d of this.diag) { r = Math.max(r, d.r); e = Math.max(e, d.e); }
-    return { r, e };
+  recent() {   // Anzeige: höchste Weite der letzten 1,5 s (1 = reicht)
+    let r = 0;
+    for (const d of this.diag) r = Math.max(r, d.r);
+    return r;
   }
-  update(Draw, extRaw, t, S) {
-    // Hand war kurz verdeckt → alten Verlauf verwerfen (sonst zählt der "Sprung" beim Wiederauftauchen)
-    if (this.buf.length && t - this.buf[this.buf.length - 1].t > 250) { this.buf = []; this.rawD = []; this.rawE = []; }
-    // Median aus 3 Bildern: einzelne Ausreißer der KI (Zittern der Hand) fallen weg
-    this.rawD.push(Draw); if (this.rawD.length > 3) this.rawD.shift();
-    this.rawE.push(extRaw); if (this.rawE.length > 4) this.rawE.shift();
-    const D = median3(this.rawD);
-    // Streckung: zweithöchster Wert der letzten 4 Bilder → kurze echte Streckung zählt, ein einzelner Ausreißer nicht
-    const ext = this.ext = this.rawE.length < 2 ? 0 : [...this.rawE].sort((x, y) => y - x)[1];
-    this.buf.push({ t, D, e: ext });
+  // side = Messwerte dieses Arms, sw = Schulterbreite (m), gibt Liste von Ereignissen zurück
+  update(side, sw, t, S) {
+    const out = [];
+    // Arm war kurz verdeckt → Verlauf verwerfen (sonst zählt der Sprung beim Wiederauftauchen)
+    if (this.prevT != null && t - this.prevT > 250) {
+      this.buf = []; this.raw = []; this.prevP = null;
+      if (this.pending) { out.push({ kind: "type", feat: this.pending.feat }); this.pending = null; }
+    }
+    // Median aus 3 Bildern gegen einzelne Ausreißer
+    this.raw.push(side); if (this.raw.length > 3) this.raw.shift();
+    const m = key => median(this.raw.map(r => key(r)));
+    // Faust (f,in,u) und Ellbogen (ef,ein,eu) relativ zur Schulter, in Oberkörper-Achsen
+    const p = { f: m(r => r.p.f), in: m(r => r.p.in), u: m(r => r.p.u),
+                ef: m(r => r.pe.f), ein: m(r => r.pe.in), eu: m(r => r.pe.u) };
+    const cur = {};
+    for (const k of FEAT_KEYS) cur[k] = m(r => r[k]);
+    // Armbewegung = Weg der Faust + Weg des Ellbogens (Haken/Uppercut: Ellbogen bewegt sich viel, Faust wenig)
+    const dP = (a, b) => Math.hypot(a.f - b.f, a.in - b.in, a.u - b.u) + Math.hypot(a.ef - b.ef, a.ein - b.ein, a.eu - b.eu);
+
+    // Geschwindigkeit (Schulterbreiten pro Sekunde)
+    let speed = 0;
+    if (this.prevP && t > this.prevT) speed = dP(p, this.prevP) / sw / ((t - this.prevT) / 1000);
+    this.prevP = p; this.prevT = t;
+
+    // Deckungs-Position lernen: dort, wo die Faust ruhig ist
+    if (!this.guard) this.guard = { ...p };
+    if (speed < 1.2) { if (this.stillSince == null) this.stillSince = t; } else this.stillSince = null;
+    const gd = dP(p, this.guard) / sw;
+    if (this.stillSince != null && this.armed && !this.pending) {
+      if (t - this.stillSince > 250 && gd < 0.6) {
+        for (const k in p) this.guard[k] += 0.15 * (p[k] - this.guard[k]);
+      } else if (t - this.stillSince > 1500) this.guard = { ...p };   // neue Deckungshaltung
+    }
+    const G = dP(p, this.guard) / sw;     // Abstand von der Deckung in Schulterbreiten
+
+    this.buf.push({ t, G });
     while (this.buf.length && t - this.buf[0].t > 450) this.buf.shift();
     let base = Infinity;
-    let eBase = Infinity;
-    for (const b of this.buf) { base = Math.min(base, b.D); eBase = Math.min(eBase, b.e); }
-    const extRise = ext - eBase;   // wie stark sich der Ellbogen gerade geöffnet hat
-    this.sig = Math.min((D - base) / S.rise, ext / S.minExt);
-    this.diag.push({ t, r: (D - base) / S.rise, e: ext });
+    for (const b of this.buf) base = Math.min(base, b.G);
+    this.sig = (G - base) / S.rise;
+    this.diag.push({ t, r: this.sig });
     while (this.diag.length && t - this.diag[0].t > 1500) this.diag.shift();
+
+    const snap = () => ({ ...cur, G });
+    // Treffpunkt verfolgen: Merkmale am weitesten Punkt des Schlags
+    if (this.pending) {
+      if (G > this.pending.G) { this.pending.G = G; this.pending.feat = snap(); }
+      if (G < this.pending.G * 0.85 || t - this.pending.t0 > 350) {
+        out.push({ kind: "type", feat: this.pending.feat }); this.lastFeat = this.pending.feat; this.pending = null;
+      }
+    }
+    const rise = (this.rise || S.rise) * (S.riseScale || 1);   // this.rise = persönlicher Wert aus der Kalibrierung
     if (this.armed) {
-      // Schlag = Faust schießt vom Körper weg + Arm ist gestreckt + Ellbogen hat sich dabei geöffnet
-      // (Kopfbewegungen öffnen den Ellbogen nicht → zählen nicht)
-      if (D - base >= S.rise && ext >= S.minExt && extRise >= 0.12 && t - this.firedAt > 160) {
-        this.armed = false; this.peak = D; this.firedAt = t; this.count++;
-        return "punch";
+      if (G - base >= rise && t - this.firedAt > 140) {
+        if (this.pending) { out.push({ kind: "type", feat: this.pending.feat }); this.pending = null; }
+        this.armed = false; this.peak = G; this.firedAt = t; this.count++;
+        this.pending = { t0: t, G, feat: snap() };
+        out.push({ kind: "hit" });
       }
     } else {
-      this.peak = Math.max(this.peak, D);
-      // wieder bereit, sobald die Hand deutlich zurückkommt (oder nach 1,2 s)
-      if ((this.peak - D >= S.rise * 0.35 && t - this.firedAt > 100) || t - this.firedAt > 1200) {
+      this.peak = Math.max(this.peak, G);
+      // wieder bereit, sobald die Faust deutlich zurückkommt (oder nach 1,2 s)
+      if ((this.peak - G >= rise * 0.35 && t - this.firedAt > 100) || t - this.firedAt > 1200) {
         this.armed = true;
-        this.buf = [{ t, D, e: ext }];   // Ausgangspunkt neu setzen → kein Doppelzählen beim Zurückziehen
+        this.buf = [{ t, G }];
       }
     }
-    return null;
+    return out;
   }
 }
-// Beide Hände zusammen. Verhindert Doppelzählung, wenn die KI kurz linke und
-// rechte Hand vertauscht (passiert vor allem beim Cross, wenn sich der Oberkörper dreht).
+
+// Schlagart bestimmen. calib = gelernte Mittelwerte je Hand und Art (aus der Kalibrierung) oder null
+const PTYPES = ["straight", "hook", "upper"];
+function classifyPunch(feat, hand, calib) {
+  if (calib && calib[hand]) {
+    let best = null, bestD = Infinity;
+    for (const ty of PTYPES) {
+      const c = calib[hand][ty];
+      if (!c) continue;
+      let d = 0;
+      for (const k of FEAT_KEYS) d += (feat[k] - c[k]) ** 2;
+      if (d < bestD) { bestD = d; best = ty; }
+    }
+    if (best) return best;
+  }
+  // Ohne Kalibrierung: Faustregeln
+  // Haken: Unterarm quer vor dem Körper, Ellbogen seitlich hochgenommen
+  if (feat.faIn > 0.5 && feat.uaU > -0.5 && feat.faUp < 0.6) return "hook";
+  // Uppercut: Unterarm steht senkrecht, Ellbogen unten, Arm gebeugt
+  if (feat.faUp > 0.55 && feat.uaU < -0.6 && Math.max(feat.ext3, feat.ext2) < 0.7) return "upper";
+  return "straight";
+}
+// Kalibrierung auswerten: samples = [{ hand, type, feat }]
+// Ergebnis: Mittelwerte je Hand & Schlagart + persönliche Schwelle je Hand
+function buildCalibration(samples) {
+  const cal = { L: {}, R: {}, rise: {} };
+  for (const hand of ["L", "R"]) {
+    for (const ty of PTYPES) {
+      const xs = samples.filter(s => s.hand === hand && s.type === ty);
+      if (!xs.length) continue;
+      const c = {};
+      for (const k of FEAT_KEYS) c[k] = xs.reduce((a, s) => a + s.feat[k], 0) / xs.length;
+      cal[hand][ty] = c;
+    }
+    // zweitschwächster Schlag (ein einzelner Ausrutscher zählt nicht), davon 70 %, aber mindestens 0,65 (sonst zählt Rauschen)
+    const gs = samples.filter(s => s.hand === hand).map(s => s.feat.G).sort((a, b) => a - b);
+    if (gs.length) cal.rise[hand] = Math.max(0.65, Math.min(1.0, 0.7 * gs[Math.min(1, gs.length - 1)]));
+  }
+  return cal;
+}
+// Boxer-Nummern: 1 Jab, 2 Cross, 3 Führhand-Haken, 4 Schlaghand-Haken, 5 Führhand-Uppercut, 6 Schlaghand-Uppercut
+function punchCode(type, hand, lead) {
+  const isLead = hand === lead;
+  return type === "straight" ? (isLead ? 1 : 2) : type === "hook" ? (isLead ? 3 : 4) : (isLead ? 5 : 6);
+}
+
 class PunchCounter {
   constructor() { this.L = new PunchArm(); this.R = new PunchArm(); this.swRef = null; this.first = null; }
-  reset() { this.L.reset(); this.R.reset(); this.swRef = null; this.first = null; this.prev = null; }
+  reset() { this.L.reset(); this.R.reset(); this.swRef = null; this.first = null; }
   get total() { return this.L.count + this.R.count; }
-  // sw = gemessene Schulterbreite, dHead/dSh = Abstände Kopf→Hand und eigene Schulter→Hand (je Seite, null = nicht sichtbar)
   update(sw, sides, t, S) {
-    // Schulterbreite nur langsam nachführen: beim Eindrehen (Cross!) wirkt sie schmaler → sonst falsche Ausschläge
+    // Schulterbreite nur langsam nachführen: beim Eindrehen wirkt sie schmaler
     if (this.swRef == null) this.swRef = sw;
     else this.swRef += 0.03 * (Math.min(1.6 * this.swRef, Math.max(0.6 * this.swRef, sw)) - this.swRef);
-    // Vertauschte Hände zurücktauschen: jede Hand muss nah an ihrer Position im letzten Bild sein
-    if (sides.L && sides.R && this.prev && this.prev.L && this.prev.R) {
-      const d = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-      const keep = d(sides.L.pos, this.prev.L) + d(sides.R.pos, this.prev.R);
-      const swap = d(sides.L.pos, this.prev.R) + d(sides.R.pos, this.prev.L);
-      this.lastSwap = swap < keep * 0.5;
-      if (this.lastSwap) [sides.L, sides.R] = [sides.R, sides.L];
-    }
-    this.prev = this.prev || {};
-    for (const k of ["L", "R"]) if (sides[k]) this.prev[k] = sides[k].pos;
-
     const events = [];
     for (const k of ["L", "R"]) {
-      const s = sides[k];
-      if (!s) continue;
-      // Nur Schulter→Faust: unabhängig davon, wie du den Kopf bewegst (abtauchen, ausweichen)
-      const D = s.dSh / this.swRef;
-      if (this[k].update(D, s.ext, t, S) === "punch") {
-        const other = this[k === "L" ? "R" : "L"];
-        if (t - other.firedAt < 150) { this[k].count--; continue; }  // gleicher Schlag, Seiten vertauscht
-        if (!this.first) this.first = t;
-        events.push(k);
+      if (!sides[k]) continue;
+      for (const ev of this[k].update(sides[k], this.swRef, t, S)) {
+        if (ev.kind === "hit") {
+          const other = this[k === "L" ? "R" : "L"];
+          // beide Hände im selben Moment = KI hat Hände vertauscht → nur einmal zählen
+          if (t - other.firedAt < 90) { this[k].count--; this[k].pending = null; continue; }
+          if (!this.first) this.first = t;
+        }
+        events.push({ k, ...ev });
       }
     }
     return events;
   }
+}
+
+// ---------- Kombi-Trainer: Auswertung ----------
+// target, got = Listen von Boxer-Nummern. Ergebnis: sauber / Hände richtig / falsch
+function judgeCombo(target, got, lead) {
+  const handOf = c => (c % 2 === 1) ? "lead" : "rear";
+  if (got.length === target.length && got.every((c, i) => c === target[i])) return "perfect";
+  if (got.length === target.length && got.every((c, i) => handOf(c) === handOf(target[i]))) return "hands";
+  return "wrong";
 }
 // ===================== END-DETECTORS =====================
 
@@ -346,12 +551,29 @@ let landmarker = null, fileset = null, drawer = null, stream = null, running = f
 let facing = "user", mode = "pushup", lastVideoTime = -1, audio = null;
 let fpsCount = 0, fpsT = performance.now(), fps = 0, lastSeen = 0;
 
-const S = { down: 105, up: 150, hDown: 0.55, hUp: 0.75, rise: 0.4, minExt: 0.62, sound: true, voice: true, model: "full" };
+const S = { down: 105, up: 150, hDown: 0.55, hUp: 0.75, rise: 0.75, riseScale: 1, stance: "orthodox",
+            sound: true, voice: true, model: "full" };
+try { S.stance = localStorage.getItem("stance") || "orthodox"; } catch (e) {}
 
 const push = new PushCounter();
 let pushRecord = 0, armRef = null;
 const box = new PunchCounter();
 box.round = { running: false, end: 0, startTotal: 0, timer: null };
+const swapState = {};
+const typeCount = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
+const lastPunch = { L: null, R: null };
+const leadHand = () => S.stance === "southpaw" ? "R" : "L";
+const rearHand = () => S.stance === "southpaw" ? "L" : "R";
+const handOfCode = c => (c % 2 === 1) ? leadHand() : rearHand();
+const PNAME = { 1: "Jab", 2: "Cross", 3: "Haken", 4: "Haken", 5: "Uppercut", 6: "Uppercut" };
+const punchName = (code, hand) => code <= 2 ? PNAME[code] : `${hand === "L" ? "linker" : "rechter"} ${PNAME[code]}`;
+let calib = null;
+try { calib = JSON.parse(localStorage.getItem("boxCalib") || "null"); } catch (e) {}
+function applyCalib() {
+  box.L.rise = calib?.rise?.L || null;
+  box.R.rise = calib?.rise?.R || null;
+}
+applyCalib();
 
 try { pushRecord = parseInt(localStorage.getItem("pushRecord") || "0", 10) || 0; } catch (e) {}
 
@@ -391,44 +613,49 @@ function say(text) {
     speechSynthesis.speak(u);
   } catch (e) {}
 }
+function speak(text, onEnd) {
+  if (!S.sound || !("speechSynthesis" in window)) { onEnd && onEnd(); return; }
+  try {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = "de-DE"; u.rate = 1.25;
+    if (onEnd) { u.onend = onEnd; u.onerror = onEnd; }
+    speechSynthesis.speak(u);
+  } catch (e) { onEnd && onEnd(); }
+}
+// Großes Hinweisfeld im Bild (Kalibrierung, Kombi-Trainer)
+function coach(big, small = "", cls = "") {
+  const el = $("coach");
+  if (big == null) { el.classList.add("hidden"); return; }
+  el.className = "coach " + cls;
+  $("coachBig").textContent = big; $("coachSmall").textContent = small;
+}
+
 // ---------- Messprotokoll (zum Kopieren für die Fehlersuche) ----------
-const LOG = [];
-function logFrame(t, sw, sides, evs) {
-  const f = x => x == null ? "" : x.toFixed(2);
+const LOG = [], PLOG = [];
+const f2 = x => x == null || isNaN(x) ? "" : x.toFixed(2);
+function logFrame(t, ex, evs) {
   const arm = k => {
-    const s = sides[k], last = box[k].diag[box[k].diag.length - 1];
+    const s = ex.sides[k];
     if (!s) return ",,,,";
-    return [f(last ? last.r : null), f(s.ext3), f(s.ext2), f(s.v), box[k].armed ? 1 : 0].join(",");
+    return [f2(box[k].sig), f2(s.ext3), f2(s.ext2), f2(s.v), box[k].armed ? 1 : 0].join(",");
   };
-  LOG.push(`${Math.round(t)},${f(sw)},${f(box.swRef)},${arm("L")},${arm("R")},${box.lastSwap ? 1 : 0},${evs.join("")}`);
+  const evStr = evs.map(e => e.kind === "hit" ? e.k : e.k.toLowerCase()).join("");
+  LOG.push(`${Math.round(t)},${f2(ex.sw)},${arm("L")},${arm("R")},${ex.swapped ? 1 : 0},${evStr}`);
   while (LOG.length > 600) LOG.shift();      // ca. 20 s
 }
+function logPunch(t, hand, code, feat) {
+  PLOG.push(`${Math.round(t)} ${hand} ${code} ${punchName(code, hand).padEnd(15)} G ${f2(feat.G)} e3 ${f2(feat.ext3)} e2 ${f2(feat.ext2)} ` +
+            `fa(${f2(feat.faF)},${f2(feat.faIn)},${f2(feat.faUp)}) ua(${f2(feat.uaF)},${f2(feat.uaIn)},${f2(feat.uaU)})`);
+  while (PLOG.length > 80) PLOG.shift();
+}
 function buildReport() {
-  const lines = LOG.map(l => l.split(","));
-  // Zusammenfassung: jede Bewegung pro Hand, bei der die Weite über 40 % ging
-  const sum = [];
-  const push1 = (k, c) => sum.push(`${k}: ${c.hit ? "GEZÄHLT " : "nicht    "} Weite ${c.r.toFixed(2)} e3 ${c.e3.toFixed(2)} e2 ${c.e2.toFixed(2)} vis ${c.v.toFixed(2)} frames ${c.n}`);
-  for (const [k, o] of [["L", 3], ["R", 8]]) {
-    let cur = null;
-    for (const c of lines) {
-      const r = parseFloat(c[o]), e3 = parseFloat(c[o + 1]), e2 = parseFloat(c[o + 2]), v = parseFloat(c[o + 3]);
-      if (!isNaN(r) && r >= 0.4) {
-        if (!cur) cur = { r: 0, e3: 0, e2: 0, v: 1, n: 0, hit: false };
-        cur.r = Math.max(cur.r, r); cur.e3 = Math.max(cur.e3, e3); cur.e2 = Math.max(cur.e2, e2);
-        cur.v = Math.min(cur.v, v); cur.n++;
-      } else if (cur) { push1(k, cur); cur = null; }
-      if (cur && c[14] && c[14].includes(k)) cur.hit = true;
-    }
-    if (cur) push1(k, cur);
-  }
-  const evL = lines.filter(c => (c[14] || "").includes("L")).length, evR = lines.filter(c => (c[14] || "").includes("R")).length;
-  const swaps = lines.filter(c => c[13] === "1").length;
   return [
-    `KI-Trainer Messprotokoll v7 · ${new Date().toLocaleString("de-DE")}`,
-    `Modell ${S.model} · FPS ${fps} · rise ${S.rise} · minExt ${S.minExt} · Frames ${lines.length}`,
-    `Gezählt im Protokoll: L ${evL} · R ${evR} · Hand-Tausch-Korrekturen ${swaps}`,
-    `--- Bewegungen (Weite>=0.4) ---`, ...sum,
-    `--- Frames: t,sw,swRef,L_r,L_e3,L_e2,L_vis,L_armed,R_r,R_e3,R_e2,R_vis,R_armed,swap,events ---`,
+    `KI-Trainer Messprotokoll v8 · ${new Date().toLocaleString("de-DE")}`,
+    `Modell ${S.model} · FPS ${fps} · Auslage ${S.stance} · Schwelle ${S.rise} · Kalibrierung ${calib ? `ja (L ${f2(calib.rise.L)} R ${f2(calib.rise.R)})` : "nein"}`,
+    `Gezählt: L ${box.L.count} · R ${box.R.count} · Typen ${JSON.stringify(typeCount)}`,
+    `--- Schläge (Zeit Hand Nr Name Weite Streckung3D/2D Unterarm(vor,quer,hoch) Oberarm(vor,quer,hoch)) ---`, ...PLOG,
+    `--- Frames: t,sw,L_sig,L_e3,L_e2,L_vis,L_armed,R_sig,R_e3,R_e2,R_vis,R_armed,swap,events(L/R=Treffer,l/r=Typ) ---`,
     ...LOG
   ].join("\n");
 }
@@ -518,30 +745,174 @@ function updatePush(lm) {
 // ---------- Boxen ----------
 function updateBox(lm, wl) {
   const now = performance.now();
-  const sw = Math.max(0.15, dist(wl[11], wl[12]));                // Schulterbreite (m)
-  const head = (lm[0].visibility ?? 1) > 0.3
-    ? wl[0]
-    : { x: (wl[11].x + wl[12].x) / 2, y: (wl[11].y + wl[12].y) / 2 - 0.25, z: (wl[11].z + wl[12].z) / 2 };
-  let seen = 0;
-  const sides = {};
-  for (const key of ["L", "R"]) {
-    const [s, , w] = ARMS[key];
-    if ((lm[w].visibility ?? 1) < 0.2) continue;
-    seen++;
-    const e = ARMS[key][1];
-    // Armstreckung (1 = ganz gestreckt). 3D-Schätzung ist beim hinteren, halb verdeckten Arm oft zu "gebeugt".
-    // Im 2D-Bild bleibt ein gerader Arm aus jedem Blickwinkel gerade → wir nehmen den größeren Wert.
-    const ext3 = dist(wl[s], wl[w]) / ((dist(wl[s], wl[e]) + dist(wl[e], wl[w])) || 1);
-    const ext2 = d2(lm[s], lm[w]) / ((d2(lm[s], lm[e]) + d2(lm[e], lm[w])) || 1);
-    const ext = Math.max(ext3, ext2);
-    const v = Math.min(lm[s].visibility ?? 1, lm[e].visibility ?? 1, lm[w].visibility ?? 1);
-    sides[key] = { dHead: dist(head, wl[w]), dSh: dist(wl[s], wl[w]), ext, ext3, ext2, v, pos: { x: lm[w].x, y: lm[w].y } };
+  const ex = extractSides(lm, wl, canvas.width, canvas.height, swapState);
+  const evs = box.update(ex.sw, ex.sides, now, S);
+  for (const ev of evs) {
+    if (ev.kind === "hit") beep(ev.k === "L" ? 620 : 900, 0.06);
+    else onTypedPunch(ev.k, ev.feat, now);
   }
-  box.lastSwap = false;
-  const evs = box.update(sw, sides, now, S);
-  for (const key of evs) beep(key === "L" ? 620 : 900, 0.06);
-  logFrame(now, sw, sides, evs);
-  setStatus(seen ? `Erkennung läuft · ${fps} FPS` : "Hände nicht sichtbar – weiter weg oder mehr Licht.");
+  logFrame(now, ex, evs);
+  const seen = Object.keys(ex.sides).length;
+  if (!calibState && !combo.active)
+    setStatus(seen ? `Erkennung läuft · ${fps} FPS${calib ? " · kalibriert" : ""}` : "Hände nicht sichtbar – weiter weg oder mehr Licht.");
+  else if (!seen) setStatus("Hände nicht sichtbar – weiter weg oder mehr Licht.");
+}
+let nameTimer = null;
+function onTypedPunch(hand, feat, t) {
+  if (calibState) { calibSample(hand, feat); return; }
+  const type = classifyPunch(feat, hand, calib);
+  const code = punchCode(type, hand, leadHand());
+  typeCount[code]++;
+  lastPunch[hand] = { code, feat };
+  logPunch(t, hand, code, feat);
+  if (combo.active) comboPunch(code, t);
+  // Name des Schlags kurz unter der großen Zahl anzeigen
+  $("bigLabel").textContent = `${code} · ${punchName(code, hand)}`;
+  clearTimeout(nameTimer);
+  nameTimer = setTimeout(() => { nameTimer = null; if (mode === "box") $("bigLabel").textContent = "Schläge"; }, 900);
+}
+
+// ---------- Kalibrierung ----------
+const CAL_STEPS = [1, 2, 3, 4, 5, 6];
+const CAL_N = 3;
+let calibState = null;
+function calStepText() {
+  const code = CAL_STEPS[calibState.step], hand = handOfCode(code);
+  const dots = "●".repeat(calibState.got) + "○".repeat(CAL_N - calibState.got);
+  coach(`${CAL_N}× ${punchName(code, hand)}`, `${dots}  ·  Schritt ${calibState.step + 1} von ${CAL_STEPS.length} · ${hand === "L" ? "linke" : "rechte"} Hand · ruhig zurück in die Deckung`);
+}
+function startCalibration() {
+  if (!running) { feedback("Erst die Kamera starten", true); return; }
+  if (calibState) { stopCalibration(true); return; }
+  if (combo.active) stopCombo();
+  calibState = { step: 0, got: 0, samples: [] };
+  S.riseScale = 0.75;                 // während der Kalibrierung etwas empfindlicher
+  box.L.rise = box.R.rise = null;
+  startCountdown();
+  calStepText();
+  $("calBtn").textContent = "✖ Kalibrierung abbrechen";
+  const code = CAL_STEPS[0];
+  speak(`Kalibrierung. ${CAL_N} mal ${punchName(code, handOfCode(code))}`);
+}
+function calibSample(hand, feat) {
+  const code = CAL_STEPS[calibState.step];
+  if (hand !== handOfCode(code)) return;        // andere Hand ignorieren
+  const type = code <= 2 ? "straight" : code <= 4 ? "hook" : "upper";
+  calibState.samples.push({ hand, type, feat });
+  calibState.got++;
+  beep(1100, 0.08, 0.25);
+  if (calibState.got >= CAL_N) {
+    calibState.step++; calibState.got = 0;
+    if (calibState.step >= CAL_STEPS.length) { finishCalibration(); return; }
+    const next = CAL_STEPS[calibState.step];
+    speak(`${CAL_N} mal ${punchName(next, handOfCode(next))}`);
+  }
+  calStepText();
+}
+function finishCalibration() {
+  calib = buildCalibration(calibState.samples);
+  calib.date = new Date().toLocaleString("de-DE");
+  try { localStorage.setItem("boxCalib", JSON.stringify(calib)); } catch (e) {}
+  stopCalibration(false);
+  applyCalib();
+  feedback("Kalibrierung fertig ✅");
+  speak("Kalibrierung fertig");
+  coach("Kalibriert ✅", "Ab jetzt erkennt die App deine Schläge", "good");
+  setTimeout(() => { if (!calibState && !combo.active) coach(null); }, 2500);
+}
+function stopCalibration(cancelled) {
+  calibState = null; S.riseScale = 1;
+  applyCalib();
+  box.reset(); for (const k in typeCount) typeCount[k] = 0; lastPunch.L = lastPunch.R = null;
+  $("calBtn").textContent = "🎯 Kalibrieren";
+  if (cancelled) { coach(null); feedback("Kalibrierung abgebrochen", true); }
+  updateCalInfo();
+}
+function updateCalInfo() {
+  $("calInfo").innerHTML = calib
+    ? `✅ Kalibriert am ${calib.date} · persönliche Schwelle links ${f2(calib.rise.L)}, rechts ${f2(calib.rise.R)}`
+    : "Noch nicht kalibriert. Die App nutzt allgemeine Regeln.";
+}
+
+// ---------- Kombi-Trainer ----------
+const COMBOS = {
+  1: ["1", "1-1", "1-2", "1-1-2", "2-1", "1-2-1", "2"],
+  2: ["1-2-3", "1-2-3-2", "3-2", "1-6-3-2", "5-2", "1-2-5-2", "1-1-2-3", "2-3-2", "1-2-1-2"],
+  3: ["1-2-3-2-5", "1-2-5-6-3", "3-4-3-2", "1-2-3-6-3-2", "5-6-5-2-3", "1-1-2-3-2", "1-2-3-4-5-6"],
+  4: ["1", "1-1", "1-2", "1-1-2", "1-2-1-2", "2-1-2", "1-1-1-2"]
+};
+const NUMWORD = { 1: "eins", 2: "zwei", 3: "drei", 4: "vier", 5: "fünf", 6: "sechs" };
+const combo = { active: false, phase: "idle", target: [], got: [], lastStr: "", listenUntil: 0, nextAt: 0,
+                lastPunchT: 0, timer: null, stats: { n: 0, perfect: 0, hands: 0 } };
+function startCombo() {
+  if (!running) { feedback("Erst die Kamera starten", true); return; }
+  if (combo.active) { stopCombo(); return; }
+  if (calibState) stopCalibration(true);
+  combo.active = true; combo.stats = { n: 0, perfect: 0, hands: 0 };
+  const cd = startCountdown();
+  combo.phase = "wait"; combo.nextAt = performance.now() + cd + 600;
+  clearInterval(combo.timer); combo.timer = setInterval(comboTick, 50);
+  $("comboBtn").textContent = "⏹ Kombi-Trainer stoppen";
+  updateComboStats();
+}
+function stopCombo() {
+  combo.active = false; combo.phase = "idle"; clearInterval(combo.timer);
+  try { speechSynthesis.cancel(); } catch (e) {}
+  coach(null);
+  $("comboBtn").textContent = "▶ Kombi-Trainer starten";
+}
+function comboTick() {
+  const now = performance.now();
+  if (cdEnd) return;                                   // Countdown läuft noch
+  if (combo.phase === "wait" && now >= combo.nextAt) announceCombo(now);
+  else if (combo.phase === "listen") {
+    const full = combo.got.length >= combo.target.length;
+    if (now >= combo.listenUntil || (full && now - combo.lastPunchT > 500)) evaluateCombo(now);
+  } else if (combo.phase === "result" && now >= combo.nextAt) combo.phase = "wait";
+}
+function announceCombo(now) {
+  const list = COMBOS[$("cLevel").value];
+  let str;
+  do { str = list[Math.floor(Math.random() * list.length)]; } while (list.length > 1 && str === combo.lastStr);
+  combo.lastStr = str;
+  combo.target = str.split("-").map(Number);
+  combo.got = [];
+  const names = combo.target.map(c => punchName(c, handOfCode(c)));
+  coach(combo.target.join(" – "), names.join(" · "));
+  const text = $("cCall").value === "num" ? combo.target.map(c => NUMWORD[c]).join(", ") : names.join(", ");
+  combo.phase = "listen";
+  // Zeit zum Schlagen: Ansage + ca. 0,6 s pro Schlag + Reserve
+  combo.listenUntil = now + 450 * combo.target.length + 600 * combo.target.length + 1500;
+  speak(text);
+}
+function comboPunch(code, t) {
+  if (combo.phase !== "listen") return;
+  combo.got.push(code);
+  combo.lastPunchT = t;
+  const marks = combo.target.map((c, i) => i < combo.got.length ? (combo.got[i] === c ? "✓" : "✗") : "·").join(" ");
+  coach(combo.target.join(" – "), marks);
+}
+function evaluateCombo(now) {
+  const res = judgeCombo(combo.target, combo.got);
+  combo.stats.n++;
+  if (res === "perfect") {
+    combo.stats.perfect++;
+    coach("✅ Sauber!", combo.target.join(" – "), "good"); beep(1200, 0.12, 0.25);
+  } else if (res === "hands") {
+    combo.stats.hands++;
+    coach("🟡 Fast!", `Hände richtig · erkannt: ${combo.got.join(" – ")}`, "mid"); beep(700, 0.12, 0.2);
+  } else {
+    coach("❌ Nochmal", combo.got.length ? `erkannt: ${combo.got.join(" – ")} · gefordert: ${combo.target.join(" – ")}` : "kein Schlag erkannt", "bad");
+    beep(260, 0.2, 0.2);
+  }
+  combo.phase = "result";
+  combo.nextAt = now + 900 + parseFloat($("cPause").value) * 1000;
+  updateComboStats();
+}
+function updateComboStats() {
+  const st = combo.stats;
+  $("cN").textContent = st.n; $("cPerfect").textContent = st.perfect; $("cHands").textContent = st.hands;
+  $("cRate").textContent = st.n ? Math.round(100 * st.perfect / st.n) + " %" : "–";
 }
 
 // ---------- Zeichnen & Anzeige ----------
@@ -577,7 +948,7 @@ function render() {
   } else {
     const total = box.L.count + box.R.count;
     $("bigCount").textContent = total;
-    $("bigLabel").textContent = "Schläge";
+    if (!nameTimer) $("bigLabel").textContent = "Schläge";
     $("bTotal").textContent = total;
     $("bLeft").textContent = box.L.count;
     $("bRight").textContent = box.R.count;
@@ -585,10 +956,13 @@ function render() {
     $("bRate").textContent = mins > 0.1 ? Math.round(total / mins) : "–";
     $("sigL").style.width = Math.max(0, Math.min(1, box.L.sig / 1.5)) * 100 + "%";
     $("sigR").style.width = Math.max(0, Math.min(1, box.R.sig / 1.5)) * 100 + "%";
+    $("t1").textContent = typeCount[1]; $("t2").textContent = typeCount[2];
+    $("t34").textContent = `${typeCount[3]} · ${typeCount[4]}`; $("t56").textContent = `${typeCount[5]} · ${typeCount[6]}`;
     for (const k of ["L", "R"]) {
-      const { r, e } = box[k].recent();
-      $("d" + k).textContent =
-        `Weite ${Math.round(r * 100)} % ${r >= 1 ? "✅" : "❌"} · Streckung ${e.toFixed(2)} ${e >= S.minExt ? "✅" : "❌"} (braucht ${S.minExt.toFixed(2)})`;
+      const lp = lastPunch[k];
+      $("d" + k).textContent = lp
+        ? `${lp.code} · ${punchName(lp.code, k)} · Weite ${f2(lp.feat.G)} · Streckung ${f2(Math.max(lp.feat.ext3, lp.feat.ext2))}`
+        : "–";
     }
     const r = box.round;
     if (r.running) {
@@ -692,6 +1066,8 @@ function stop() {
   try { wakeLock?.release(); } catch (e) {}
   $("startBtn").disabled = false; $("stopBtn").disabled = true;
   cdEnd = 0; $("countdown").classList.add("hidden");
+  if (combo.active) stopCombo();
+  if (calibState) stopCalibration(true);
   setStatus("Gestoppt."); render();
 }
 
@@ -710,6 +1086,8 @@ document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () =>
   $("depth").classList.toggle("hidden", !isPush);
   $("boxPanel").classList.toggle("hidden", isPush);
   $("boxSettings").classList.toggle("hidden", isPush);
+  if (combo.active) stopCombo();
+  if (calibState) stopCalibration(true);
   resetLive(); render();
 }));
 
@@ -717,7 +1095,11 @@ $("startBtn").onclick = start;
 $("stopBtn").onclick = stop;
 $("resetBtn").onclick = () => {
   if (mode === "pushup") { push.reset(); armRef = null; }
-  else { box.reset(); box.round.startTotal = 0; }
+  else {
+    box.reset(); box.round.startTotal = 0;
+    for (const k in typeCount) typeCount[k] = 0; lastPunch.L = lastPunch.R = null;
+    combo.stats = { n: 0, perfect: 0, hands: 0 }; updateComboStats();
+  }
   if (running) startCountdown();
   render();
 };
@@ -785,7 +1167,15 @@ bindSlider("sUp", "oUp", "up", "°");
 bindSlider("sHDown", "oHDown", "hDown", "", 2);
 bindSlider("sHUp", "oHUp", "hUp", "", 2);
 bindSlider("sRise", "oRise", "rise", "", 2);
-bindSlider("sMinExt", "oMinExt", "minExt", "", 2);
+$("sStance").value = S.stance;
+$("sStance").onchange = e => { S.stance = e.target.value; try { localStorage.setItem("stance", S.stance); } catch (err) {} };
+$("calBtn").onclick = startCalibration;
+$("calDelBtn").onclick = () => {
+  calib = null; try { localStorage.removeItem("boxCalib"); } catch (e) {}
+  applyCalib(); updateCalInfo(); feedback("Kalibrierung gelöscht");
+};
+$("comboBtn").onclick = startCombo;
+updateCalInfo();
 $("sVoice").onchange = e => S.voice = e.target.checked;
 
 render();
