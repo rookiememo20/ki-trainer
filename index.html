@@ -91,7 +91,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>🥊 KI-Trainer <span class="ver">v9.3 · Push-ups & Schläge zählen</span></h1>
+  <h1>🥊 KI-Trainer <span class="ver">v9.4 · Push-ups & Schläge zählen</span></h1>
 
   <div class="tabs">
     <button class="tab active" data-mode="pushup">💪 Push-ups</button>
@@ -266,7 +266,7 @@
 </div>
 
 <script type="module">
-const APP_VER = "v9.3";
+const APP_VER = "v9.4";
 import { PoseLandmarker, FilesetResolver, DrawingUtils }
   from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
 
@@ -490,7 +490,7 @@ class PunchArm {
       vUp = (p.u - this.prevP.u) / sw / dt;          // Faust nach oben (Schulterbreiten/s)
       vFwd = (p.f - this.prevP.f) / sw / dt;         // Faust nach vorne
     }
-    this.prevP = p; this.prevT = t;
+    this.prevP = p; this.prevT = t; this.lastP = p;
     this.lastVUp = Math.max(vUp, (this.lastVUp || 0) * 0.5);
     this.lastVFwd = Math.max(vFwd, (this.lastVFwd || 0) * 0.5);
 
@@ -537,7 +537,16 @@ class PunchArm {
       // (nur wenn die Faust vorher wirklich in der Deckung war und der letzte Schlag > 0,25 s her ist –
       //  sonst zählt das Nachfedern/Zurückziehen eines Schlags doppelt)
       const fast = G - base >= rise * 0.55 && v2peak >= (S.vFire || 3.0) && base <= rise * 0.5 && t - this.firedAt > 250;
-      if ((G - base >= rise || fast) && t - this.firedAt > 140) {
+      // Zweite Chance: Eine Bewegung wurde gerade als Mitbewegung verworfen (z. B. Führhand sinkt beim Cross ab),
+      // und direkt danach schlägt die Hand von dort aus zu (Haken aus der abgesunkenen Hand).
+      // Gemessen wird dann ab dem Punkt, an dem verworfen wurde – aber nur mit Schlag-Haltung
+      // (Arm im Bild gestreckt, Ellbogen oben), damit das Zurückgehen in die Deckung nicht zählt.
+      let re = false;
+      if (this.reStart) {
+        if (t - this.reStart.t > 450 || this.pending) this.reStart = null;
+        else if (dP(p, this.reStart.p0) / sw >= rise && cur.ext2 >= 0.6 && cur.uaU >= (this.uaRef ?? -0.25) - 0.35) re = true;
+      }
+      if ((G - base >= rise || fast || re) && t - this.firedAt > 140) {
         if (this.pending) out.push(this.finishPending());
         this.prevFiredAt = this.firedAt;
         this.armed = false; this.peak = G; this.firedAt = t; this.count++;
@@ -547,6 +556,7 @@ class PunchArm {
           uMin = Math.min(uMin, b.u); fMin = Math.min(fMin, b.f);
           if (b.G < gMin && b.p) { gMin = b.G; startP = b.p; }       // Startpunkt = ruhigster Punkt vor dem Schlag
         }
+        if (re) { startP = this.reStart.p0; uMin = Math.min(uMin, startP.u); fMin = Math.min(fMin, startP.f); this.reStart = null; }
         this.pending = { t0: t, G, feat: snap(), uMin, fMin, up: (p.u - uMin) / sw, fw: (p.f - fMin) / sw, base, gain: G - base,
                          startP, endP: p, sw, D: dP(p, startP) / sw, frames: [{ D: dP(p, startP) / sw, side }],
                          vUp: Math.max(vUp, this.lastVUp || 0), vFwd: Math.max(vFwd, this.lastVFwd || 0) };
@@ -610,10 +620,15 @@ function classifyPunch(feat, hand, calib, leadH = "L") {
       // Arm im Bild voll gestreckt und Faust geht weniger quer als bei deinem Haken → gerader Schlag (Jab/Cross)
       best = "straight";
     }
+    // Arm deutlich weniger gestreckt als dein gerader Schlag, Faust geht aber weit nach oben → Uppercut
+    if (best === "straight" && C.upper && C.straight && feat.ext2 < C.straight.ext2 - 0.2 &&
+        feat.upGain > (C.straight.upGain + C.upper.upGain) / 2 && feat.faUp > C.straight.faUp + 0.1) best = "upper";
     // "Uppercut", bei dem die Faust gar nicht nach oben geht = Nachzucken nach einem Schlag
     if (best === "upper" && feat.upGain != null && feat.upGain < 0.15 && (feat.upShare ?? 1) < 0.2) return "none";
     // Faust geht deutlich nach hinten UND nach unten = Hände runternehmen (beim Uppercut wird das tiefste Ausholen gemessen)
     if (best !== "upper" && feat.pF != null && feat.pF < -0.4 && feat.pU < -0.4) return "none";
+    // "Gerader Schlag", bei dem die Faust nach hinten geht = Hand wird zurückgezogen / sinkt ab
+    if (best === "straight" && feat.pF != null && feat.pF < -0.3) return "none";
     if (best) return best;
   }
   // Ohne Kalibrierung: Faustregeln
@@ -717,10 +732,12 @@ class PunchCounter {
           const uaLim = this[k].uaRef != null ? this[k].uaRef - 0.4 : -0.6;   // deutlich tiefer als bei deinen echten Schlägen
           const guardSlide = k === (S.stance === "southpaw" ? "R" : "L") && ev.gap < 300 && f.uaU < uaLim && Math.max(f.ext3, f.ext2) < 0.9 && !(f.faUp > 0.65 && f.upGain > 0.6);   // echter Uppercut bleibt
           // c) kurz (< 0,2 s) nach dem anderen Schlag, im Bild viel weniger gestreckt als jeder deiner echten Schläge → Mitbewegung
-          const flat = this[k].e2Ref != null && ev.gap < 200 && f.ext2 < Math.min(0.5, this[k].e2Ref - 0.2) && !(f.faUp > 0.65 && f.upGain > 0.6);
+          const flat = this[k].e2Ref != null && ev.gap < 300 && f.ext2 < Math.min(0.5, this[k].e2Ref - 0.2) && !(f.faUp > 0.65 && f.upGain > 0.6);
           if (weak || guardSlide || flat) {
             this[k].count = Math.max(0, this[k].count - 1);
-            events.push({ k, kind: "undo" });
+            this[k].reStart = this[k].lastP ? { t, p0: this[k].lastP } : null;   // Zweite Chance für einen Schlag direkt danach
+            this[k].armed = true; this[k].firedAt = this[k].prevFiredAt ?? -1e9;
+            events.push({ k, kind: "undo", feat: f, why: weak ? "schwach" : guardSlide ? "Ellbogen unten" : "kaum gestreckt", gap: ev.gap });
             continue;
           }
         }
@@ -1071,7 +1088,11 @@ function updateBox(lm, wl) {
   const evs = box.update(ex.sw, ex.sides, now, S);
   for (const ev of evs) {
     if (ev.kind === "hit") beep(ev.k === "L" ? 620 : 900, 0.06);
-    else if (ev.kind === "undo") PLOG.push(`${Math.round(now)} ${ev.k} – verworfen (Mitbewegung der anderen Hand)`);
+    else if (ev.kind === "undo") {
+      const f = ev.feat || {};
+      PLOG.push(`${Math.round(now)} ${ev.k} – verworfen (Mitbewegung: ${ev.why}, ${Math.round(ev.gap)} ms) e3 ${f2(f.ext3)} e2 ${f2(f.ext2)} ` +
+                `fa(${f2(f.faF)},${f2(f.faIn)},${f2(f.faUp)}) ua(${f2(f.uaF)},${f2(f.uaIn)},${f2(f.uaU)}) hoch ${f2(f.upGain)} weg(${f2(f.pF)},${f2(f.pIn)},${f2(f.pU)})`);
+    }
     else onTypedPunch(ev.k, ev.feat, now);
   }
   logFrame(now, ex, evs);
@@ -1087,6 +1108,9 @@ function onTypedPunch(hand, feat, t) {
   const type = classifyPunch(feat, hand, calib, leadHand());
   if (type === "none") {                               // Hände runtergenommen → Zählung zurücknehmen
     box[hand].count = Math.max(0, box[hand].count - 1);
+    // Zweite Chance: schlägt die Hand direkt aus dieser Position heraus (z. B. Haken aus der abgesunkenen Hand)
+    const A = box[hand];
+    if (A.lastP && !A.pending) { A.reStart = { t, p0: A.lastP }; A.armed = true; A.firedAt = A.prevFiredAt ?? -1e9; }
     // kurz nach einem Schlag derselben Hand = Hand kommt nicht zurück zum Kinn → Deckungs-Hinweis
     if (!calibState && t - lastRealPunch[hand] < 900) {
       guardDrops[hand]++;
