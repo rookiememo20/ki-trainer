@@ -73,7 +73,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>🥊 KI-Trainer <span class="ver">v6 · Push-ups & Schläge zählen</span></h1>
+  <h1>🥊 KI-Trainer <span class="ver">v7 · Push-ups & Schläge zählen</span></h1>
 
   <div class="tabs">
     <button class="tab active" data-mode="pushup">💪 Push-ups</button>
@@ -137,7 +137,9 @@
         <option value="180" selected>3:00 Runde</option>
       </select>
       <button class="btn" id="roundBtn">⏱ Runde starten</button>
+      <button class="btn" id="copyBtn">📋 Messwerte kopieren</button>
     </div>
+    <textarea id="reportBox" class="hidden" style="width:100%;height:160px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:8px;font-size:11px"></textarea>
   </div>
 
   <details>
@@ -309,7 +311,8 @@ class PunchCounter {
       const d = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
       const keep = d(sides.L.pos, this.prev.L) + d(sides.R.pos, this.prev.R);
       const swap = d(sides.L.pos, this.prev.R) + d(sides.R.pos, this.prev.L);
-      if (swap < keep * 0.5) [sides.L, sides.R] = [sides.R, sides.L];
+      this.lastSwap = swap < keep * 0.5;
+      if (this.lastSwap) [sides.L, sides.R] = [sides.R, sides.L];
     }
     this.prev = this.prev || {};
     for (const k of ["L", "R"]) if (sides[k]) this.prev[k] = sides[k].pos;
@@ -383,6 +386,57 @@ function say(text) {
     speechSynthesis.speak(u);
   } catch (e) {}
 }
+// ---------- Messprotokoll (zum Kopieren für die Fehlersuche) ----------
+const LOG = [];
+function logFrame(t, sw, sides, evs) {
+  const f = x => x == null ? "" : x.toFixed(2);
+  const arm = k => {
+    const s = sides[k], last = box[k].diag[box[k].diag.length - 1];
+    if (!s) return ",,,,";
+    return [f(last ? last.r : null), f(s.ext3), f(s.ext2), f(s.v), box[k].armed ? 1 : 0].join(",");
+  };
+  LOG.push(`${Math.round(t)},${f(sw)},${f(box.swRef)},${arm("L")},${arm("R")},${box.lastSwap ? 1 : 0},${evs.join("")}`);
+  while (LOG.length > 600) LOG.shift();      // ca. 20 s
+}
+function buildReport() {
+  const lines = LOG.map(l => l.split(","));
+  // Zusammenfassung: jede Bewegung pro Hand, bei der die Weite über 40 % ging
+  const sum = [];
+  const push1 = (k, c) => sum.push(`${k}: ${c.hit ? "GEZÄHLT " : "nicht    "} Weite ${c.r.toFixed(2)} e3 ${c.e3.toFixed(2)} e2 ${c.e2.toFixed(2)} vis ${c.v.toFixed(2)} frames ${c.n}`);
+  for (const [k, o] of [["L", 3], ["R", 8]]) {
+    let cur = null;
+    for (const c of lines) {
+      const r = parseFloat(c[o]), e3 = parseFloat(c[o + 1]), e2 = parseFloat(c[o + 2]), v = parseFloat(c[o + 3]);
+      if (!isNaN(r) && r >= 0.4) {
+        if (!cur) cur = { r: 0, e3: 0, e2: 0, v: 1, n: 0, hit: false };
+        cur.r = Math.max(cur.r, r); cur.e3 = Math.max(cur.e3, e3); cur.e2 = Math.max(cur.e2, e2);
+        cur.v = Math.min(cur.v, v); cur.n++;
+      } else if (cur) { push1(k, cur); cur = null; }
+      if (cur && c[14] && c[14].includes(k)) cur.hit = true;
+    }
+    if (cur) push1(k, cur);
+  }
+  const evL = lines.filter(c => (c[14] || "").includes("L")).length, evR = lines.filter(c => (c[14] || "").includes("R")).length;
+  const swaps = lines.filter(c => c[13] === "1").length;
+  return [
+    `KI-Trainer Messprotokoll v7 · ${new Date().toLocaleString("de-DE")}`,
+    `Modell ${S.model} · FPS ${fps} · rise ${S.rise} · minExt ${S.minExt} · Frames ${lines.length}`,
+    `Gezählt im Protokoll: L ${evL} · R ${evR} · Hand-Tausch-Korrekturen ${swaps}`,
+    `--- Bewegungen (Weite>=0.4) ---`, ...sum,
+    `--- Frames: t,sw,swRef,L_r,L_e3,L_e2,L_vis,L_armed,R_r,R_e3,R_e2,R_vis,R_armed,swap,events ---`,
+    ...LOG
+  ].join("\n");
+}
+async function copyReport() {
+  const text = buildReport();
+  try { await navigator.clipboard.writeText(text); feedback("Messwerte kopiert ✅ – jetzt im Chat einfügen"); }
+  catch (e) {
+    const ta = $("reportBox");
+    ta.classList.remove("hidden"); ta.value = text; ta.focus(); ta.select();
+    feedback("Text markiert – mit Kopieren übernehmen", true);
+  }
+}
+
 // ---------- Countdown ----------
 let cdEnd = 0, cdLast = null;
 function startCountdown() {
@@ -475,9 +529,13 @@ function updateBox(lm, wl) {
     const ext3 = dist(wl[s], wl[w]) / ((dist(wl[s], wl[e]) + dist(wl[e], wl[w])) || 1);
     const ext2 = d2(lm[s], lm[w]) / ((d2(lm[s], lm[e]) + d2(lm[e], lm[w])) || 1);
     const ext = Math.max(ext3, ext2);
-    sides[key] = { dHead: dist(head, wl[w]), dSh: dist(wl[s], wl[w]), ext, pos: { x: lm[w].x, y: lm[w].y } };
+    const v = Math.min(lm[s].visibility ?? 1, lm[e].visibility ?? 1, lm[w].visibility ?? 1);
+    sides[key] = { dHead: dist(head, wl[w]), dSh: dist(wl[s], wl[w]), ext, ext3, ext2, v, pos: { x: lm[w].x, y: lm[w].y } };
   }
-  for (const key of box.update(sw, sides, now, S)) beep(key === "L" ? 620 : 900, 0.06);
+  box.lastSwap = false;
+  const evs = box.update(sw, sides, now, S);
+  for (const key of evs) beep(key === "L" ? 620 : 900, 0.06);
+  logFrame(now, sw, sides, evs);
   setStatus(seen ? `Erkennung läuft · ${fps} FPS` : "Hände nicht sichtbar – weiter weg oder mehr Licht.");
 }
 
@@ -658,6 +716,7 @@ $("resetBtn").onclick = () => {
   if (running) startCountdown();
   render();
 };
+$("copyBtn").onclick = copyReport;
 $("cdBtn").onclick = () => {
   if (!audio) { try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
   if (running) startCountdown(); else feedback("Erst die Kamera starten", true);
