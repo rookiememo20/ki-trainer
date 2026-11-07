@@ -91,7 +91,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>🥊 KI-Trainer <span class="ver">v8.4 · Push-ups & Schläge zählen</span></h1>
+  <h1>🥊 KI-Trainer <span class="ver">v8.5 · Push-ups & Schläge zählen</span></h1>
 
   <div class="tabs">
     <button class="tab active" data-mode="pushup">💪 Push-ups</button>
@@ -155,7 +155,8 @@
     <div class="card tips" id="diag" style="margin-bottom:10px">
       <b>Letzter Schlag</b> (Balken am weißen Strich = Schlag zählt)<br>
       <span style="color:var(--left)">Links:</span> <span id="dL">–</span><br>
-      <span style="color:var(--right)">Rechts:</span> <span id="dR">–</span>
+      <span style="color:var(--right)">Rechts:</span> <span id="dR">–</span><br>
+      🛡️ <b>Deckung gefallen</b> (Hand nach dem Schlag nicht zurück ans Kinn): <span id="dDrop">0</span>
     </div>
 
     <div class="section">
@@ -505,7 +506,9 @@ class PunchArm {
     const rise = (this.rise || S.rise) * (S.riseScale || 1);   // this.rise = persönlicher Wert aus der Kalibrierung
     if (this.armed) {
       // Schlag: weit genug aus der Deckung – ODER etwas kürzer, aber sehr schnell (kurze Schläge wie Uppercuts)
-      const fast = G - base >= rise * 0.55 && v2peak >= (S.vFire || 3.0);
+      // (nur wenn die Faust vorher wirklich in der Deckung war und der letzte Schlag > 0,25 s her ist –
+      //  sonst zählt das Nachfedern/Zurückziehen eines Schlags doppelt)
+      const fast = G - base >= rise * 0.55 && v2peak >= (S.vFire || 3.0) && base <= rise * 0.5 && t - this.firedAt > 250;
       if ((G - base >= rise || fast) && t - this.firedAt > 140) {
         if (this.pending) out.push(this.finishPending());
         this.prevFiredAt = this.firedAt;
@@ -741,9 +744,9 @@ function logPunch(t, hand, code, feat) {
 }
 function buildReport() {
   return [
-    `KI-Trainer Messprotokoll v8 · ${new Date().toLocaleString("de-DE")}`,
+    `KI-Trainer Messprotokoll v8.5 · ${new Date().toLocaleString("de-DE")}`,
     `Modell ${S.model} · FPS ${fps} · Auslage ${S.stance} · Schwelle ${S.rise} · Kalibrierung ${calib ? `ja (L ${f2(calib.rise.L)} R ${f2(calib.rise.R)})` : "nein"}`,
-    `Gezählt: L ${box.L.count} · R ${box.R.count} · Typen ${JSON.stringify(typeCount)}`,
+    `Gezählt: L ${box.L.count} · R ${box.R.count} · Typen ${JSON.stringify(typeCount)} · Deckung gefallen L ${guardDrops.L} R ${guardDrops.R}`,
     ...(calib && calib.samples ? [`--- Kalibrier-Proben (Hand Art Weite | ${FEAT_KEYS.join(" ")}) ---`,
         ...calib.samples.map(x => `${x.hand} ${x.type.padEnd(8)} G ${f2(x.G)} | ${x.f.map(f2).join(" ")}`)] : []),
     `--- Schläge (Zeit Hand Nr Name Weite Streckung3D/2D Unterarm(vor,quer,hoch) Oberarm(vor,quer,hoch) Faust-Weg hoch/vor) ---`, ...PLOG,
@@ -868,10 +871,18 @@ function updateBox(lm, wl) {
   else if (!seen) setStatus("Hände nicht sichtbar – weiter weg oder mehr Licht.");
 }
 let nameTimer = null;
+const lastRealPunch = { L: -1e9, R: -1e9 };
+const guardDrops = { L: 0, R: 0 };
 function onTypedPunch(hand, feat, t) {
   const type = classifyPunch(feat, hand, calib);
   if (type === "none") {                               // Hände runtergenommen → Zählung zurücknehmen
     box[hand].count = Math.max(0, box[hand].count - 1);
+    // kurz nach einem Schlag derselben Hand = Hand kommt nicht zurück zum Kinn → Deckungs-Hinweis
+    if (!calibState && t - lastRealPunch[hand] < 900) {
+      guardDrops[hand]++;
+      feedback(`🛡️ ${hand === "L" ? "Linke" : "Rechte"} Hand hoch!`, true);
+      beep(300, 0.15, 0.2);
+    }
     PLOG.push(`${Math.round(t)} ${hand} – verworfen (Hand runtergenommen) ua(${f2(feat.uaF)},${f2(feat.uaIn)},${f2(feat.uaU)}) fa(${f2(feat.faF)},${f2(feat.faIn)},${f2(feat.faUp)})`);
     return;
   }
@@ -879,6 +890,7 @@ function onTypedPunch(hand, feat, t) {
   const code = punchCode(type, hand, leadHand());
   typeCount[code]++;
   lastPunch[hand] = { code, feat };
+  lastRealPunch[hand] = t;
   logPunch(t, hand, code, feat);
   if (combo.active) comboPunch(code, t);
   // Name des Schlags kurz unter der großen Zahl anzeigen
@@ -1075,6 +1087,7 @@ function render() {
     $("sigL").style.width = Math.max(0, Math.min(1, box.L.sig / 1.5)) * 100 + "%";
     $("sigR").style.width = Math.max(0, Math.min(1, box.R.sig / 1.5)) * 100 + "%";
     $("t1").textContent = typeCount[1]; $("t2").textContent = typeCount[2];
+    $("dDrop").textContent = `links ${guardDrops.L}× · rechts ${guardDrops.R}×`;
     $("t34").textContent = `${typeCount[3]} · ${typeCount[4]}`; $("t56").textContent = `${typeCount[5]} · ${typeCount[6]}`;
     for (const k of ["L", "R"]) {
       const lp = lastPunch[k];
@@ -1231,6 +1244,7 @@ $("resetBtn").onclick = () => {
   else {
     box.reset(); box.round.startTotal = 0;
     for (const k in typeCount) typeCount[k] = 0; lastPunch.L = lastPunch.R = null;
+    guardDrops.L = guardDrops.R = 0;
     combo.stats = { n: 0, perfect: 0, hands: 0 }; updateComboStats();
   }
   if (running) startCountdown();
