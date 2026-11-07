@@ -20,8 +20,16 @@
   .tab{flex:1;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--panel);
     color:var(--text);font-size:1rem;font-weight:600;cursor:pointer}
   .tab.active{background:var(--accent);border-color:var(--accent);color:#06240f}
-  .stage{position:relative;width:100%;max-height:75vh;background:#000;border-radius:16px;overflow:hidden;
-    aspect-ratio:16/9;border:1px solid var(--line);margin:0 auto}
+  /* Bildbereich passt sich dem Seitenverhältnis der Kamera an (keine schwarzen Ränder):
+     so breit wie möglich, aber nie höher als 80 % des Bildschirms */
+  .stage{--ar:16 / 9;position:relative;width:min(100%, calc(80vh * var(--ar)));width:min(100%, calc(80dvh * var(--ar)));
+    aspect-ratio:var(--ar);background:#000;border-radius:16px;overflow:hidden;border:1px solid var(--line);margin:0 auto}
+  /* Vollbild: Bild füllt den ganzen Bildschirm (zum Trainieren aus 2–3 m Entfernung) */
+  .stage.full{position:fixed;inset:0;width:100vw;height:100vh;height:100dvh;aspect-ratio:auto;border-radius:0;border:0;z-index:100;margin:0}
+  .stage.full .big{font-size:clamp(4rem,16vw,10rem)}
+  .fsbtn{position:absolute;right:10px;top:10px;z-index:5;background:rgba(0,0,0,.55);color:#fff;border:1px solid rgba(255,255,255,.35);
+    border-radius:10px;padding:8px 12px;font-size:1rem;font-weight:700;cursor:pointer}
+  .stage.full .fsbtn{top:max(10px, env(safe-area-inset-top));right:max(10px, env(safe-area-inset-right))}
   .stage video,.stage canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
   .mirror{transform:scaleX(-1)}
   .placeholder{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
@@ -40,7 +48,7 @@
   .countdown .n{font-size:clamp(5rem,25vw,12rem);font-weight:900;line-height:1;color:var(--warn);
     text-shadow:0 4px 20px rgba(0,0,0,.9)}
   .countdown .t{font-size:1.1rem;font-weight:700;color:#fff;text-shadow:0 2px 8px #000;margin-top:8px}
-  .depth{position:absolute;right:12px;top:12%;bottom:12%;width:18px;border-radius:9px;
+  .depth{position:absolute;right:12px;top:18%;bottom:10%;width:18px;border-radius:9px;
     background:rgba(255,255,255,.15);overflow:hidden}
   .depth>div{position:absolute;top:0;left:0;right:0;background:var(--warn);transition:height .08s}
   .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:12px 0}
@@ -83,7 +91,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>🥊 KI-Trainer <span class="ver">v8.1 · Push-ups & Schläge zählen</span></h1>
+  <h1>🥊 KI-Trainer <span class="ver">v8.2 · Push-ups & Schläge zählen</span></h1>
 
   <div class="tabs">
     <button class="tab active" data-mode="pushup">💪 Push-ups</button>
@@ -91,6 +99,7 @@
   </div>
 
   <div class="stage" id="stage">
+    <button class="fsbtn" id="fsBtn" title="Vollbild">⛶ Vollbild</button>
     <video id="video" playsinline muted></video>
     <canvas id="canvas"></canvas>
     <div class="placeholder" id="placeholder">Tippe auf <b>&nbsp;„Kamera starten“&nbsp;</b> und erlaube den Kamerazugriff.</div>
@@ -1000,7 +1009,7 @@ function loop() {
     lastVideoTime = video.currentTime;
     if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
       canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-      $("stage").style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
+      $("stage").style.setProperty("--ar", `${video.videoWidth} / ${video.videoHeight}`);
     }
     const now = performance.now();
     fpsCount++;
@@ -1114,6 +1123,19 @@ document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () =>
   resetLive(); render();
 }));
 
+// Vollbild: echtes Vollbild, wo der Browser es erlaubt, sonst Bildbereich über die ganze Seite
+function setFull(on) {
+  const st = $("stage");
+  st.classList.toggle("full", on);
+  $("fsBtn").textContent = on ? "✕ Vollbild beenden" : "⛶ Vollbild";
+  document.body.style.overflow = on ? "hidden" : "";
+  try {
+    if (on && st.requestFullscreen && !document.fullscreenElement) st.requestFullscreen().catch(() => {});
+    if (!on && document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  } catch (e) {}
+}
+$("fsBtn").onclick = () => setFull(!$("stage").classList.contains("full"));
+document.addEventListener("fullscreenchange", () => { if (!document.fullscreenElement && $("stage").classList.contains("full")) setFull(false); });
 $("startBtn").onclick = start;
 $("stopBtn").onclick = stop;
 $("resetBtn").onclick = () => {
