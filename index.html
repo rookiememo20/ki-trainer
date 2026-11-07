@@ -91,7 +91,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>🥊 KI-Trainer <span class="ver">v8.5 · Push-ups & Schläge zählen</span></h1>
+  <h1>🥊 KI-Trainer <span class="ver">v8.6 · Push-ups & Schläge zählen</span></h1>
 
   <div class="tabs">
     <button class="tab active" data-mode="pushup">💪 Push-ups</button>
@@ -353,20 +353,37 @@ function torsoFrame(wl, J) {
 function extractSides(lm, wl, W, H, st) {
   const P2 = i => ({ x: lm[i].x * W, y: lm[i].y * H });
   const visI = i => lm[i].visibility ?? 1;
-  // 1) Vertauschte linke/rechte Punkte korrigieren (jedes Paar einzeln, über die Position im letzten Bild)
+  // 1) Vertauschte linke/rechte Punkte korrigieren
+  //    Schultern & Hüfte: Du schaust zur Kamera → deine linke Schulter ist im (ungespiegelten) Bild rechts.
+  //    Ellbogen & Handgelenke: Die KI vertauscht die Zuordnung manchmal plötzlich → solche Sprünge erkennen
+  //    (Rohdaten mit Rohdaten vergleichen, damit sich ein Fehler nicht aufschaukelt) + Notbremse über die Armlänge.
   const map = {};
-  let swapped = false;
-  for (const [a, b] of [[11, 12], [13, 14], [15, 16], [23, 24]]) {
-    if (st.prev && st.prev[a] && st.prev[b]) {
-      const A = P2(a), B = P2(b), d = (p, q) => Math.hypot(p.x - q.x, p.y - q.y);
-      const keep = d(A, st.prev[a]) + d(B, st.prev[b]);
-      const swap = d(A, st.prev[b]) + d(B, st.prev[a]);
-      if (swap < keep * 0.5 && keep > 0.04 * W) { map[a] = b; map[b] = a; swapped = true; }
-    }
+  const d = (p, q) => Math.hypot(p.x - q.x, p.y - q.y);
+  st.flip = st.flip || {};
+  for (const [a, b] of [[11, 12], [23, 24]]) {
+    const dx = lm[a].x - lm[b].x;
+    if (Math.abs(dx) > 0.03) st.flip[a] = dx < 0;          // eindeutig → festlegen; sonst letzte Entscheidung behalten
+    if (st.flip[a]) { map[a] = b; map[b] = a; }
   }
+  const J0 = i => map[i] ?? i;
+  for (const [a, b, ownA, ownB] of [[13, 14, J0(11), J0(12)], [15, 16, null, null]]) {
+    const A = P2(a), B = P2(b);
+    if (st.raw && st.raw[a] && st.raw[b]) {
+      const keep = d(A, st.raw[a]) + d(B, st.raw[b]), swap = d(A, st.raw[b]) + d(B, st.raw[a]);
+      if (swap < keep * 0.5 && keep > 0.04 * W) st.flip[a] = !st.flip[a];   // KI hat in diesem Bild getauscht
+    }
+    // Notbremse: Zuordnung muss zur Armlänge passen (Ellbogen ↔ Schulter, Handgelenk ↔ Ellbogen)
+    const aL = ownA != null ? P2(ownA) : P2(map[13] ? 14 : 13);
+    const aR = ownB != null ? P2(ownB) : P2(map[13] ? 13 : 14);
+    const [X, Y] = st.flip[a] ? [B, A] : [A, B];             // X gehört gerade zu links, Y zu rechts
+    const cur = d(X, aL) + d(Y, aR), alt = d(X, aR) + d(Y, aL);
+    if (alt < cur * 0.5) st.flip[a] = !st.flip[a];
+    if (st.flip[a]) { map[a] = b; map[b] = a; }
+  }
+  st.raw = {};
+  for (const i of [13, 14, 15, 16]) st.raw[i] = P2(i);
+  const swapped = Object.keys(map).length > 0;
   const J = i => map[i] ?? i;
-  st.prev = {};
-  for (const i of [11, 12, 13, 14, 15, 16, 23, 24]) st.prev[i] = P2(J(i));
 
   const F = torsoFrame(wl, J);
   const sh2 = { x: (P2(J(11)).x + P2(J(12)).x) / 2, y: (P2(J(11)).y + P2(J(12)).y) / 2 };
@@ -490,7 +507,7 @@ class PunchArm {
     this.diag.push({ t, r: this.sig });
     while (this.diag.length && t - this.diag[0].t > 1500) this.diag.shift();
 
-    const snap = () => ({ ...cur, G });
+    const snap = () => ({ ...cur, G, handH: p.u / sw });   // handH: Faust über(+)/unter(−) der Schulter
     // Schlag verfolgen: Armhaltung am weitesten Punkt (von der Deckung aus), dazu über den ganzen
     // Schlag hinweg, wie weit die Faust von ihrem tiefsten Punkt nach oben bzw. nach vorne ging
     if (this.pending) {
@@ -535,8 +552,9 @@ class PunchArm {
 // Schlagart bestimmen. calib = gelernte Mittelwerte je Hand und Art (aus der Kalibrierung) oder null
 const PTYPES = ["straight", "hook", "upper"];
 function classifyPunch(feat, hand, calib) {
-  // Arm hängt nach unten (Oberarm senkrecht runter, Unterarm nicht hoch) = Hände runtergenommen, kein Schlag
-  if (feat.uaU < -0.75 && feat.faUp < 0.2) return "none";
+  // Hände runtergenommen: Oberarm hängt senkrecht UND (Unterarm zeigt nach unten ODER Faust tief unter der Schulter).
+  // Ein tiefer Haken (Ellbogen unten, Unterarm waagerecht quer) bleibt ein Schlag.
+  if (feat.uaU < -0.75 && (feat.faUp < -0.3 || (feat.handH ?? -9) < -0.9)) return "none";
   if (calib && calib[hand]) {
     let best = null, bestD = Infinity;
     for (const ty of PTYPES) {
@@ -570,7 +588,7 @@ function buildCalibration(samples) {
       const xs = samples.filter(s => s.hand === hand && s.type === ty);
       if (!xs.length) continue;
       const c = {};
-      for (const k of FEAT_KEYS) c[k] = xs.reduce((a, s) => a + s.feat[k], 0) / xs.length;
+      for (const k of FEAT_KEYS) c[k] = median(xs.map(s => s.feat[k]));   // Median: ein Ausrutscher zählt nicht
       cal[hand][ty] = c;
     }
     // Anstieg aus der Deckung beim zweitschwächsten Schlag (ein Ausrutscher zählt nicht), davon 70 %,
@@ -744,7 +762,7 @@ function logPunch(t, hand, code, feat) {
 }
 function buildReport() {
   return [
-    `KI-Trainer Messprotokoll v8.5 · ${new Date().toLocaleString("de-DE")}`,
+    `KI-Trainer Messprotokoll v8.6 · ${new Date().toLocaleString("de-DE")}`,
     `Modell ${S.model} · FPS ${fps} · Auslage ${S.stance} · Schwelle ${S.rise} · Kalibrierung ${calib ? `ja (L ${f2(calib.rise.L)} R ${f2(calib.rise.R)})` : "nein"}`,
     `Gezählt: L ${box.L.count} · R ${box.R.count} · Typen ${JSON.stringify(typeCount)} · Deckung gefallen L ${guardDrops.L} R ${guardDrops.R}`,
     ...(calib && calib.samples ? [`--- Kalibrier-Proben (Hand Art Weite | ${FEAT_KEYS.join(" ")}) ---`,
@@ -859,6 +877,12 @@ function updateBox(lm, wl) {
   const now = performance.now();
   const ex = extractSides(lm, wl, canvas.width, canvas.height, swapState);
   checkPosition(ex, now);
+  // Stehst du länger als 0,6 s ungünstig (seitlich / läufst zur Kamera), wird nicht gezählt
+  if (posCheck.narrowSince != null && now - posCheck.narrowSince > 600) {
+    box.L.prevT = box.R.prevT = -1e9;              // Verlauf neu beginnen, wenn du zurück bist
+    setStatus("Zählpause – stell dich wieder in Position.");
+    return;
+  }
   const evs = box.update(ex.sw, ex.sides, now, S);
   for (const ev of evs) {
     if (ev.kind === "hit") beep(ev.k === "L" ? 620 : 900, 0.06);
