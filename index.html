@@ -73,7 +73,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>🥊 KI-Trainer <span class="ver">v7 · Push-ups & Schläge zählen</span></h1>
+  <h1>🥊 KI-Trainer <span class="ver">v7.1 · Push-ups & Schläge zählen</span></h1>
 
   <div class="tabs">
     <button class="tab active" data-mode="pushup">💪 Push-ups</button>
@@ -169,7 +169,7 @@
       <div class="tips">Die App misst zwei Dinge: den Ellbogenwinkel und wie hoch deine Schultern über den Händen sind. Sie nimmt automatisch das Signal, das sich bei dir stärker bewegt. Der gelbe Balken rechts im Bild zeigt die Tiefe: ganz voll = unten erkannt.</div>
     </div>
     <div id="boxSettings" class="hidden">
-      <div class="row"><label>Schlagweite (weniger = empfindlicher)</label><input type="range" id="sRise" min="0.20" max="1.20" step="0.01" value="0.50"><output id="oRise">0.50</output></div>
+      <div class="row"><label>Schlagweite (weniger = empfindlicher)</label><input type="range" id="sRise" min="0.20" max="1.20" step="0.01" value="0.40"><output id="oRise">0.40</output></div>
       <div class="row"><label>Mindest-Armstreckung (weniger = empfindlicher)</label><input type="range" id="sMinExt" min="0.45" max="0.95" step="0.01" value="0.62"><output id="oMinExt">0.62</output></div>
       <div class="tips">Ein Schlag zählt nur, wenn <b>beides</b> erfüllt ist: Die Hand schießt schnell weit genug nach vorne (<b>Schlagweite</b>) und der Arm ist dabei gestreckt genug (<b>Armstreckung</b>, 1 = ganz gestreckt, Deckung ≈ 0,4). Die Balken zeigen live, wie nah du dran bist. Erreicht ein Balken den weißen Strich, zählt der Schlag.<br>
       <b>Zählt bei kleinen Bewegungen:</b> beide Werte größer machen. <b>Haken/Schläge fehlen:</b> Armstreckung kleiner machen (Haken ≈ 0,65–0,75).</div>
@@ -272,15 +272,19 @@ class PunchArm {
     const D = median3(this.rawD);
     // Streckung: zweithöchster Wert der letzten 4 Bilder → kurze echte Streckung zählt, ein einzelner Ausreißer nicht
     const ext = this.ext = this.rawE.length < 2 ? 0 : [...this.rawE].sort((x, y) => y - x)[1];
-    this.buf.push({ t, D });
+    this.buf.push({ t, D, e: ext });
     while (this.buf.length && t - this.buf[0].t > 450) this.buf.shift();
     let base = Infinity;
-    for (const b of this.buf) base = Math.min(base, b.D);
+    let eBase = Infinity;
+    for (const b of this.buf) { base = Math.min(base, b.D); eBase = Math.min(eBase, b.e); }
+    const extRise = ext - eBase;   // wie stark sich der Ellbogen gerade geöffnet hat
     this.sig = Math.min((D - base) / S.rise, ext / S.minExt);
     this.diag.push({ t, r: (D - base) / S.rise, e: ext });
     while (this.diag.length && t - this.diag[0].t > 1500) this.diag.shift();
     if (this.armed) {
-      if (D - base >= S.rise && ext >= S.minExt && t - this.firedAt > 160) {
+      // Schlag = Faust schießt vom Körper weg + Arm ist gestreckt + Ellbogen hat sich dabei geöffnet
+      // (Kopfbewegungen öffnen den Ellbogen nicht → zählen nicht)
+      if (D - base >= S.rise && ext >= S.minExt && extRise >= 0.12 && t - this.firedAt > 160) {
         this.armed = false; this.peak = D; this.firedAt = t; this.count++;
         return "punch";
       }
@@ -289,7 +293,7 @@ class PunchArm {
       // wieder bereit, sobald die Hand deutlich zurückkommt (oder nach 1,2 s)
       if ((this.peak - D >= S.rise * 0.35 && t - this.firedAt > 100) || t - this.firedAt > 1200) {
         this.armed = true;
-        this.buf = [{ t, D }];   // Ausgangspunkt neu setzen → kein Doppelzählen beim Zurückziehen
+        this.buf = [{ t, D, e: ext }];   // Ausgangspunkt neu setzen → kein Doppelzählen beim Zurückziehen
       }
     }
     return null;
@@ -321,7 +325,8 @@ class PunchCounter {
     for (const k of ["L", "R"]) {
       const s = sides[k];
       if (!s) continue;
-      const D = (s.dHead + s.dSh) / 2 / this.swRef;
+      // Nur Schulter→Faust: unabhängig davon, wie du den Kopf bewegst (abtauchen, ausweichen)
+      const D = s.dSh / this.swRef;
       if (this[k].update(D, s.ext, t, S) === "punch") {
         const other = this[k === "L" ? "R" : "L"];
         if (t - other.firedAt < 150) { this[k].count--; continue; }  // gleicher Schlag, Seiten vertauscht
@@ -341,7 +346,7 @@ let landmarker = null, fileset = null, drawer = null, stream = null, running = f
 let facing = "user", mode = "pushup", lastVideoTime = -1, audio = null;
 let fpsCount = 0, fpsT = performance.now(), fps = 0, lastSeen = 0;
 
-const S = { down: 105, up: 150, hDown: 0.55, hUp: 0.75, rise: 0.5, minExt: 0.62, sound: true, voice: true, model: "full" };
+const S = { down: 105, up: 150, hDown: 0.55, hUp: 0.75, rise: 0.4, minExt: 0.62, sound: true, voice: true, model: "full" };
 
 const push = new PushCounter();
 let pushRecord = 0, armRef = null;
