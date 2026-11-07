@@ -91,7 +91,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>🥊 KI-Trainer <span class="ver">v8.3 · Push-ups & Schläge zählen</span></h1>
+  <h1>🥊 KI-Trainer <span class="ver">v8.4 · Push-ups & Schläge zählen</span></h1>
 
   <div class="tabs">
     <button class="tab active" data-mode="pushup">💪 Push-ups</button>
@@ -368,6 +368,9 @@ function extractSides(lm, wl, W, H, st) {
   for (const i of [11, 12, 13, 14, 15, 16, 23, 24]) st.prev[i] = P2(J(i));
 
   const F = torsoFrame(wl, J);
+  const sh2 = { x: (P2(J(11)).x + P2(J(12)).x) / 2, y: (P2(J(11)).y + P2(J(12)).y) / 2 };
+  const hp2 = { x: (P2(J(23)).x + P2(J(24)).x) / 2, y: (P2(J(23)).y + P2(J(24)).y) / 2 };
+  const torso2 = Math.max(20, Math.hypot(sh2.x - hp2.x, sh2.y - hp2.y));   // Rumpflänge im Bild (Pixel)
   const sw = Math.max(0.15, vlen(vsub(wl[J(11)], wl[J(12)])));
   const sides = {};
   for (const [k, s, e, w, sign] of [["L", 11, 13, 15, -1], ["R", 12, 14, 16, 1]]) {
@@ -386,19 +389,43 @@ function extractSides(lm, wl, W, H, st) {
       p, pe, ext3, ext2, uaF: ua.f, uaIn: ua.in, uaU: ua.u,
       faF: vdot(fa, F.f), faIn: sign * vdot(fa, F.l), faUp: vdot(fa, F.u),
       v: Math.min(visI(S_), visI(E_), visI(W_)),
+      q: { x: (P2(W_).x - P2(S_).x) / torso2, y: (P2(W_).y - P2(S_).y) / torso2 },   // Faust rel. Schulter im Bild
       pos: { x: lm[W_].x, y: lm[W_].y }
     };
   }
   return { sw, sides, swapped };
 }
 
-const FEAT_KEYS = ["ext3", "ext2", "faF", "faIn", "faUp", "uaF", "uaIn", "uaU"];
+// upGain = wie weit die Faust im Schlag von ihrem tiefsten Punkt nach OBEN gegangen ist (Schulterbreiten)
+//          → typisch für Uppercuts (erst leicht absenken, dann hoch), bei Geraden und Haken klein
+// fwdGain = wie weit die Faust nach VORNE gegangen ist (Oberkörper-Richtung, Schulterbreiten)
+// upShare = Anteil der Aufwärts-Geschwindigkeit an (aufwärts + vorwärts): Uppercut hoch, Gerade niedrig
+const FEAT_KEYS = ["ext3", "ext2", "faF", "faIn", "faUp", "uaF", "uaIn", "uaU", "upGain", "fwdGain", "upShare"];
+// Gewichtung beim Vergleich mit der Kalibrierung: Bewegungsrichtung zählt stärker
+const FEAT_W = { upShare: 2.5, upGain: 1, fwdGain: 1.5 };
 class PunchArm {
   constructor() { this.reset(); }
   reset() {
     this.count = 0; this.armed = true; this.buf = []; this.peak = 0; this.firedAt = -1e9;
     this.sig = 0; this.raw = []; this.guard = null; this.stillSince = null;
     this.prevP = null; this.prevT = null; this.pending = null; this.diag = []; this.lastFeat = null;
+  }
+  // Auslösen zurücknehmen (war Mitbewegung / Hand-Tausch): Hand sofort wieder bereit
+  cancelFire() {
+    this.count = Math.max(0, this.count - 1);
+    this.pending = null;
+    this.armed = true;
+    this.firedAt = this.prevFiredAt ?? -1e9;
+    const last = this.buf[this.buf.length - 1];
+    this.buf = last ? [last] : [];
+  }
+  finishPending() {
+    const P = this.pending; this.pending = null;
+    // Richtungs-Anteil der Schlaggeschwindigkeit: 1 = rein nach oben, 0 = rein nach vorne
+    const upShare = P.vUp > 0 || P.vFwd > 0 ? Math.max(0, P.vUp) / (Math.max(0, P.vUp) + Math.max(0, P.vFwd) || 1) : 0;
+    const feat = { ...P.feat, upGain: P.up, fwdGain: P.fw, upShare, gain: P.gain };
+    this.lastFeat = feat;
+    return { kind: "type", feat };
   }
   recent() {   // Anzeige: höchste Weite der letzten 1,5 s (1 = reicht)
     let r = 0;
@@ -410,8 +437,8 @@ class PunchArm {
     const out = [];
     // Arm war kurz verdeckt → Verlauf verwerfen (sonst zählt der Sprung beim Wiederauftauchen)
     if (this.prevT != null && t - this.prevT > 250) {
-      this.buf = []; this.raw = []; this.prevP = null;
-      if (this.pending) { out.push({ kind: "type", feat: this.pending.feat }); this.pending = null; }
+      this.buf = []; this.raw = []; this.prevP = null; this.prevQ = null; this.v2hist = [];
+      if (this.pending) out.push(this.finishPending());
     }
     // Median aus 3 Bildern gegen einzelne Ausreißer
     this.raw.push(side); if (this.raw.length > 3) this.raw.shift();
@@ -425,9 +452,23 @@ class PunchArm {
     const dP = (a, b) => Math.hypot(a.f - b.f, a.in - b.in, a.u - b.u) + Math.hypot(a.ef - b.ef, a.ein - b.ein, a.eu - b.eu);
 
     // Geschwindigkeit (Schulterbreiten pro Sekunde)
-    let speed = 0;
-    if (this.prevP && t > this.prevT) speed = dP(p, this.prevP) / sw / ((t - this.prevT) / 1000);
+    // Geschwindigkeit der Faust im Bild relativ zur Schulter (Rumpflängen/s) – sehr genau, Ganzkörper-Bewegung hebt sich auf
+    const qx = median(this.raw.map(r => r.q ? r.q.x : 0)), qy = median(this.raw.map(r => r.q ? r.q.y : 0));
+    let v2 = 0;
+    if (this.prevQ && t > this.prevT) v2 = Math.hypot(qx - this.prevQ.x, qy - this.prevQ.y) / ((t - this.prevT) / 1000);
+    this.prevQ = { x: qx, y: qy };
+    this.v2hist = (this.v2hist || []).concat(v2).slice(-3);
+    const v2peak = Math.max(...this.v2hist);
+    let speed = 0, vUp = 0, vFwd = 0;
+    if (this.prevP && t > this.prevT) {
+      const dt = (t - this.prevT) / 1000;
+      speed = dP(p, this.prevP) / sw / dt;
+      vUp = (p.u - this.prevP.u) / sw / dt;          // Faust nach oben (Schulterbreiten/s)
+      vFwd = (p.f - this.prevP.f) / sw / dt;         // Faust nach vorne
+    }
     this.prevP = p; this.prevT = t;
+    this.lastVUp = Math.max(vUp, (this.lastVUp || 0) * 0.5);
+    this.lastVFwd = Math.max(vFwd, (this.lastVFwd || 0) * 0.5);
 
     // Deckungs-Position lernen: dort, wo die Faust ruhig ist
     if (!this.guard) this.guard = { ...p };
@@ -440,7 +481,7 @@ class PunchArm {
     }
     const G = dP(p, this.guard) / sw;     // Abstand von der Deckung in Schulterbreiten
 
-    this.buf.push({ t, G });
+    this.buf.push({ t, G, u: p.u, f: p.f });
     while (this.buf.length && t - this.buf[0].t > 450) this.buf.shift();
     let base = Infinity;
     for (const b of this.buf) base = Math.min(base, b.G);
@@ -449,20 +490,31 @@ class PunchArm {
     while (this.diag.length && t - this.diag[0].t > 1500) this.diag.shift();
 
     const snap = () => ({ ...cur, G });
-    // Treffpunkt verfolgen: Merkmale am weitesten Punkt des Schlags
+    // Schlag verfolgen: Armhaltung am weitesten Punkt (von der Deckung aus), dazu über den ganzen
+    // Schlag hinweg, wie weit die Faust von ihrem tiefsten Punkt nach oben bzw. nach vorne ging
     if (this.pending) {
-      if (G > this.pending.G) { this.pending.G = G; this.pending.feat = snap(); }
-      if (G < this.pending.G * 0.85 || t - this.pending.t0 > 350) {
-        out.push({ kind: "type", feat: this.pending.feat }); this.lastFeat = this.pending.feat; this.pending = null;
-      }
+      const P = this.pending;
+      P.uMin = Math.min(P.uMin, p.u); P.fMin = Math.min(P.fMin, p.f);
+      P.up = Math.max(P.up, (p.u - P.uMin) / sw); P.fw = Math.max(P.fw, (p.f - P.fMin) / sw);
+      P.vUp = Math.max(P.vUp, vUp); P.vFwd = Math.max(P.vFwd, vFwd);
+      if (G > P.G) { P.G = G; P.feat = snap(); }
+      P.gain = Math.max(P.gain, G - P.base);
+      const age = t - P.t0;
+      if (age >= 300 || (age >= 180 && G < P.G * 0.5)) out.push(this.finishPending());
     }
     const rise = (this.rise || S.rise) * (S.riseScale || 1);   // this.rise = persönlicher Wert aus der Kalibrierung
     if (this.armed) {
-      if (G - base >= rise && t - this.firedAt > 140) {
-        if (this.pending) { out.push({ kind: "type", feat: this.pending.feat }); this.pending = null; }
+      // Schlag: weit genug aus der Deckung – ODER etwas kürzer, aber sehr schnell (kurze Schläge wie Uppercuts)
+      const fast = G - base >= rise * 0.55 && v2peak >= (S.vFire || 3.0);
+      if ((G - base >= rise || fast) && t - this.firedAt > 140) {
+        if (this.pending) out.push(this.finishPending());
+        this.prevFiredAt = this.firedAt;
         this.armed = false; this.peak = G; this.firedAt = t; this.count++;
         this.lastStrength = (G - base) / rise;          // wie deutlich die Schwelle überschritten wurde
-        this.pending = { t0: t, G, feat: snap() };
+        let uMin = Infinity, fMin = Infinity;
+        for (const b of this.buf) { uMin = Math.min(uMin, b.u); fMin = Math.min(fMin, b.f); }
+        this.pending = { t0: t, G, feat: snap(), uMin, fMin, up: (p.u - uMin) / sw, fw: (p.f - fMin) / sw, base, gain: G - base,
+                         vUp: Math.max(vUp, this.lastVUp || 0), vFwd: Math.max(vFwd, this.lastVFwd || 0) };
         out.push({ kind: "hit" });
       }
     } else {
@@ -470,7 +522,7 @@ class PunchArm {
       // wieder bereit, sobald die Faust deutlich zurückkommt (oder nach 1,2 s)
       if ((this.peak - G >= rise * 0.35 && t - this.firedAt > 100) || t - this.firedAt > 1200) {
         this.armed = true;
-        this.buf = [{ t, G }];
+        this.buf = [{ t, G, u: p.u, f: p.f }];
       }
     }
     return out;
@@ -488,12 +540,18 @@ function classifyPunch(feat, hand, calib) {
       const c = calib[hand][ty];
       if (!c) continue;
       let d = 0;
-      for (const k of FEAT_KEYS) d += (feat[k] - c[k]) ** 2;
+      for (const k of FEAT_KEYS) {
+        if (c[k] == null || feat[k] == null) continue;
+        const sd = (calib.sd && calib.sd[k]) || 0.15;
+        d += (FEAT_W[k] || 1) * ((feat[k] - c[k]) / sd) ** 2;
+      }
       if (d < bestD) { bestD = d; best = ty; }
     }
     if (best) return best;
   }
   // Ohne Kalibrierung: Faustregeln
+  // Uppercut: Faust geht deutlich von unten nach oben, Unterarm zeigt nach oben
+  if (feat.faUp > 0.3 && feat.upGain > 0.25 && feat.upShare > 0.5 && feat.fwdGain < 0.45) return "upper";
   // Haken: Unterarm quer vor dem Körper, Ellbogen seitlich hochgenommen
   if (feat.faIn > 0.5 && feat.uaU > -0.5 && feat.faUp < 0.6) return "hook";
   // Uppercut: Unterarm steht senkrecht, Ellbogen unten, Arm gebeugt
@@ -512,10 +570,22 @@ function buildCalibration(samples) {
       for (const k of FEAT_KEYS) c[k] = xs.reduce((a, s) => a + s.feat[k], 0) / xs.length;
       cal[hand][ty] = c;
     }
-    // zweitschwächster Schlag (ein einzelner Ausrutscher zählt nicht), davon 70 %, aber mindestens 0,65 (sonst zählt Rauschen)
-    const gs = samples.filter(s => s.hand === hand).map(s => s.feat.G).sort((a, b) => a - b);
-    if (gs.length) cal.rise[hand] = Math.max(0.65, Math.min(1.0, 0.7 * gs[Math.min(1, gs.length - 1)]));
+    // Anstieg aus der Deckung beim zweitschwächsten Schlag (ein Ausrutscher zählt nicht), davon 70 %,
+    // aber mindestens 0,65 (sonst zählt Rauschen)
+    const gs = samples.filter(s => s.hand === hand).map(s => s.feat.gain ?? s.feat.G).sort((a, b) => a - b);
+    if (gs.length) cal.rise[hand] = Math.max(0.65, Math.min(0.95, 0.7 * gs[Math.min(1, gs.length - 1)]));
   }
+  // typische Streuung je Merkmal innerhalb einer Schlagart (damit kein Merkmal den Vergleich dominiert)
+  cal.sd = {};
+  for (const k of FEAT_KEYS) {
+    let ss = 0, n = 0;
+    for (const hand of ["L", "R"]) for (const ty of PTYPES) {
+      const c = cal[hand][ty]; if (!c) continue;
+      for (const s of samples.filter(x => x.hand === hand && x.type === ty)) { ss += (s.feat[k] - c[k]) ** 2; n++; }
+    }
+    cal.sd[k] = Math.max(0.08, Math.sqrt(ss / Math.max(1, n)));
+  }
+  cal.v = 2;
   return cal;
 }
 // Boxer-Nummern: 1 Jab, 2 Cross, 3 Führhand-Haken, 4 Schlaghand-Haken, 5 Führhand-Uppercut, 6 Schlaghand-Uppercut
@@ -539,10 +609,10 @@ class PunchCounter {
         if (ev.kind === "hit") {
           const other = this[k === "L" ? "R" : "L"];
           // beide Hände im selben Moment = KI hat Hände vertauscht → nur einmal zählen
-          if (t - other.firedAt < 90) { this[k].count--; this[k].pending = null; continue; }
+          if (t - other.firedAt < 90) { this[k].cancelFire(); continue; }
           // Mitbewegung: Beim Jab zuckt die hintere Hand oft mit (Körperdrehung). Kommt eine Bewegung
           // kurz (< 0,2 s) nach einem Schlag der anderen Hand und ist nur knapp über der Schwelle → kein Schlag
-          if (t - other.firedAt < 200 && this[k].lastStrength < 1.4) { this[k].count--; this[k].pending = null; continue; }
+          if (t - other.firedAt < 200 && this[k].lastStrength < 1.4) { this[k].cancelFire(); continue; }
           if (!this.first) this.first = t;
         }
         events.push({ k, ...ev });
@@ -587,6 +657,8 @@ const PNAME = { 1: "Jab", 2: "Cross", 3: "Haken", 4: "Haken", 5: "Uppercut", 6: 
 const punchName = (code, hand) => code <= 2 ? PNAME[code] : `${hand === "L" ? "linker" : "rechter"} ${PNAME[code]}`;
 let calib = null;
 try { calib = JSON.parse(localStorage.getItem("boxCalib") || "null"); } catch (e) {}
+let calibOutdated = false;
+if (calib && (calib.v || 1) < 2) { calib = null; calibOutdated = true; }   // ältere Kalibrierung kennt die neuen Messwerte nicht
 function applyCalib() {
   box.L.rise = calib?.rise?.L || null;
   box.R.rise = calib?.rise?.R || null;
@@ -664,7 +736,7 @@ function logFrame(t, ex, evs) {
 }
 function logPunch(t, hand, code, feat) {
   PLOG.push(`${Math.round(t)} ${hand} ${code} ${punchName(code, hand).padEnd(15)} G ${f2(feat.G)} e3 ${f2(feat.ext3)} e2 ${f2(feat.ext2)} ` +
-            `fa(${f2(feat.faF)},${f2(feat.faIn)},${f2(feat.faUp)}) ua(${f2(feat.uaF)},${f2(feat.uaIn)},${f2(feat.uaU)})`);
+            `fa(${f2(feat.faF)},${f2(feat.faIn)},${f2(feat.faUp)}) ua(${f2(feat.uaF)},${f2(feat.uaIn)},${f2(feat.uaU)}) hoch ${f2(feat.upGain)} vor ${f2(feat.fwdGain)}`);
   while (PLOG.length > 80) PLOG.shift();
 }
 function buildReport() {
@@ -674,7 +746,7 @@ function buildReport() {
     `Gezählt: L ${box.L.count} · R ${box.R.count} · Typen ${JSON.stringify(typeCount)}`,
     ...(calib && calib.samples ? [`--- Kalibrier-Proben (Hand Art Weite | ${FEAT_KEYS.join(" ")}) ---`,
         ...calib.samples.map(x => `${x.hand} ${x.type.padEnd(8)} G ${f2(x.G)} | ${x.f.map(f2).join(" ")}`)] : []),
-    `--- Schläge (Zeit Hand Nr Name Weite Streckung3D/2D Unterarm(vor,quer,hoch) Oberarm(vor,quer,hoch)) ---`, ...PLOG,
+    `--- Schläge (Zeit Hand Nr Name Weite Streckung3D/2D Unterarm(vor,quer,hoch) Oberarm(vor,quer,hoch) Faust-Weg hoch/vor) ---`, ...PLOG,
     `--- Frames: t,sw,L_sig,L_e3,L_e2,L_vis,L_armed,R_sig,R_e3,R_e2,R_vis,R_armed,swap,events(L/R=Treffer,l/r=Typ) ---`,
     ...LOG
   ].join("\n");
@@ -875,7 +947,9 @@ function stopCalibration(cancelled) {
 function updateCalInfo() {
   $("calInfo").innerHTML = calib
     ? `✅ Kalibriert am ${calib.date} · persönliche Schwelle links ${f2(calib.rise.L)}, rechts ${f2(calib.rise.R)}`
-    : "Noch nicht kalibriert. Die App nutzt allgemeine Regeln.";
+    : calibOutdated
+      ? "⚠️ Neue Version: Die Erkennung misst jetzt auch die Bewegungsrichtung – bitte <b>neu kalibrieren</b>."
+      : "Noch nicht kalibriert. Die App nutzt allgemeine Regeln.";
 }
 
 // ---------- Kombi-Trainer ----------
