@@ -155,7 +155,7 @@
 <div class="wrap">
   <div class="top">
     <h1><span class="logo">🥊</span> KI-Trainer</h1>
-    <span class="ver">v9.6</span>
+    <span class="ver">v9.7</span>
   </div>
 
   <div class="tabs">
@@ -350,7 +350,7 @@
 </div>
 
 <script type="module">
-const APP_VER = "v9.6";
+const APP_VER = "v9.7";
 import { PoseLandmarker, FilesetResolver, DrawingUtils }
   from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
 
@@ -440,6 +440,41 @@ function torsoFrame(wl, J) {
 
 // Aus den KI-Punkten die Messwerte pro Arm berechnen.
 // lm = Bildpunkte (0..1), wl = 3D-Punkte (Meter), W/H = Bildgröße, st = Zustand für Tausch-Erkennung
+// Messfehler der KI abfangen: Ist eine Hand verdeckt (z. B. die Führhand, wenn der Cross davor vorbeigeht),
+// rät die KI ihre Position – der Punkt springt dann unmöglich schnell weg (nach unten oder auf die andere Faust).
+// Dann bleibt die Hand an ihrer letzten guten Stelle (mit dem Oberkörper mitbewegt), bis sie wieder an einer
+// erreichbaren Stelle auftaucht – höchstens 0,25 s lang, danach gilt wieder die KI.
+// Grenze 30 Schulterbreiten/s: deine schnellsten echten Schläge liegen in den Testaufnahmen darunter.
+const GLITCH_V = 30, GLITCH_VRE = 15, GLITCH_HOLD = 250;
+function holdGlitches(lm, wl, W, H, st, t) {
+  const sw = Math.hypot((lm[11].x - lm[12].x) * W, (lm[11].y - lm[12].y) * H);
+  if (!(sw > 0)) return { lm, wl, held: 0 };
+  if (st.sw == null || t - (st.t ?? -1e9) > 500) { st.sw = sw; st.L = st.R = null; }
+  else st.sw += 0.02 * (Math.min(1.5 * st.sw, Math.max(0.6 * st.sw, sw)) - st.sw);
+  st.t = t;
+  const mx = (lm[11].x + lm[12].x) / 2 * W, my = (lm[11].y + lm[12].y) / 2 * H;
+  let out = null, held = 0;
+  for (const [k, idx] of [["L", [15, 17, 19, 21]], ["R", [16, 18, 20, 22]]]) {
+    const j = idx[0], rel = { x: lm[j].x * W - mx, y: lm[j].y * H - my };
+    const s = st[k];
+    const keep = () => { st[k] = { rel, t, lm: idx.map(i => ({ ...lm[i] })), wl: idx.map(i => ({ ...wl[i] })), holdT: null }; };
+    if (!s) { keep(); continue; }
+    const dt = Math.max(0.008, (t - s.t) / 1000);
+    const v = Math.hypot(rel.x - s.rel.x, rel.y - s.rel.y) / st.sw / dt;
+    const lim = s.holdT == null ? GLITCH_V : GLITCH_VRE;
+    if (v > lim && !(s.holdT != null && t - s.holdT > GLITCH_HOLD)) {
+      if (s.holdT == null) s.holdT = t;
+      if (!out) out = { lm: lm.slice(), wl: wl.slice() };
+      const ox = (s.rel.x + mx) / W - s.lm[0].x, oy = (s.rel.y + my) / H - s.lm[0].y;
+      idx.forEach((i, q) => {
+        out.lm[i] = { x: s.lm[q].x + ox, y: s.lm[q].y + oy, z: s.lm[q].z, visibility: Math.min(lm[i].visibility ?? 1, 0.5) };
+        out.wl[i] = { ...s.wl[q] };
+      });
+      held++;
+    } else keep();
+  }
+  return out ? { ...out, held } : { lm, wl, held };
+}
 function extractSides(lm, wl, W, H, st) {
   const P2 = i => ({ x: lm[i].x * W, y: lm[i].y * H });
   const visI = i => lm[i].visibility ?? 1;
@@ -628,7 +663,8 @@ class PunchArm {
       let re = false;
       if (this.reStart) {
         if (t - this.reStart.t > 450 || this.pending) this.reStart = null;
-        else if (dP(p, this.reStart.p0) / sw >= rise && cur.ext2 >= 0.6 && cur.uaU >= (this.uaRef ?? -0.25) - 0.35) re = true;
+        // frühestens 0,1 s danach: so schnell kann kein echter neuer Schlag kommen (deine: ab 0,2 s)
+        else if (t - this.reStart.t >= 100 && dP(p, this.reStart.p0) / sw >= rise && cur.ext2 >= 0.6 && cur.uaU >= (this.uaRef ?? -0.25) - 0.35) re = true;
       }
       if ((G - base >= rise || fast || re) && t - this.firedAt > 140) {
         if (this.pending) out.push(this.finishPending());
@@ -697,8 +733,12 @@ function classifyPunch(feat, hand, calib, leadH = "L") {
     if (lead && feat.pIn != null && best === "hook" && C.straight && feat.ext2 >= 0.85 && feat.faIn + 0.5 * feat.pIn < -0.25) best = "straight";
     if (lead && feat.pIn != null && best === "upper" && C.straight && feat.ext2 >= 0.9 && feat.pIn < -0.6) best = "straight";
     // Schlaghand: Haken = Faust geht kaum nach vorne, Oberarm schwenkt nach außen; Cross = Faust geht nach vorne
-    if (!lead && feat.pF != null && best === "straight" && C.hook && feat.pF < 0.1 && feat.uaIn < -0.15) best = "hook";
+    // (aber nicht, wenn die Faust insgesamt weit nach vorne ging – schneller Cross mit starker Körperdrehung)
+    if (!lead && feat.pF != null && best === "straight" && C.hook && feat.pF < 0.1 && feat.uaIn < -0.15 && !(feat.fwdGain >= 0.6)) best = "hook";
     else if (!lead && feat.pF != null && best === "hook" && C.straight && feat.pF >= 0.15 && feat.uaIn > 0.1 && feat.ext2 >= 0.9) best = "straight";
+    // Schlaghand: Faust geht weit nach vorne (deine echten rechten Haken: Weg nach vorne höchstens 0,2,
+    // Vorwärts-Anteil höchstens 0,45) → Cross. Wichtig bei schnellen Crosses mit starker Körperdrehung.
+    else if (!lead && feat.pF != null && best === "hook" && C.straight && feat.ext2 >= 0.9 && (feat.pF >= 0.3 || feat.fwdGain >= 0.6)) best = "straight";
     if (best === "hook" && C.straight && C.hook && C.hook.faIn - C.straight.faIn >= 0.3 &&
         feat.faIn < C.hook.faIn - 0.08 && feat.ext2 >= 0.9) {
       // Arm im Bild voll gestreckt und Faust geht weniger quer als bei deinem Haken → gerader Schlag (Jab/Cross)
@@ -712,7 +752,21 @@ function classifyPunch(feat, hand, calib, leadH = "L") {
     // Faust geht deutlich nach hinten UND nach unten = Hände runternehmen (beim Uppercut wird das tiefste Ausholen gemessen)
     if (best !== "upper" && feat.pF != null && feat.pF < -0.4 && feat.pU < -0.4) return "none";
     // "Gerader Schlag", bei dem die Faust nach hinten geht = Hand wird zurückgezogen / sinkt ab
-    if (best === "straight" && feat.pF != null && feat.pF < -0.3) return "none";
+    // (aber nicht beim Cross, wenn die Faust insgesamt weit nach vorne ging: Startpunkt wurde schon vorne gemessen)
+    if (best === "straight" && feat.pF != null && feat.pF < -0.3 && !(!lead && feat.fwdGain >= 0.6)) return "none";
+    // Führhand-"Haken"/"Uppercut", bei dem die Faust nach UNTEN geht und der Ellbogen sich nicht hebt
+    // (oder der Oberarm gar nicht nach vorne zeigt) = die Hand war nur verdeckt (z. B. wenn der Cross davor
+    // vorbeigeht) und der KI-Punkt ist abgerutscht. Echte Haken/Uppercuts heben immer Faust und Ellbogen.
+    // Grenzen: Faust fällt deutlich (< −0,4) ohne dass der Ellbogen hochgeht, oder fällt überhaupt und der
+    // Oberarm zeigt beim Haken kaum nach vorne (beim Uppercut ist der Oberarm sowieso tief).
+    // Ein schneller Haken aus hoher Deckung darf leicht nach unten gehen.
+    if (lead && (best === "hook" || best === "upper") && feat.pU != null &&
+        feat.faUp < 0.4 &&      // Unterarm steht senkrecht nach oben = echter Uppercut (holt oft erst nach unten aus)
+        ((feat.pU < -0.4 && feat.eU < 0.2) || (best === "hook" && feat.pU < 0 && feat.uaF < 0.45))) return "none";
+    // dasselbe beim "Jab": Faust fällt deutlich nach unten, Ellbogen hebt sich nicht → kein Schlag
+    if (lead && best === "straight" && feat.pU != null && feat.pU < -0.3 && feat.eU < 0.2) return "none";
+    // "Jab" mit senkrecht hängendem Oberarm (viel tiefer als bei jedem deiner Jabs) = verdeckte Hand, kein Schlag
+    if (lead && best === "straight" && C.straight && feat.uaU < C.straight.uaU - 0.9) return "none";
     if (best) return best;
   }
   // Ohne Kalibrierung: Faustregeln
@@ -821,6 +875,10 @@ class PunchCounter {
             this[k].count = Math.max(0, this[k].count - 1);
             this[k].reStart = this[k].lastP ? { t, p0: this[k].lastP } : null;   // Zweite Chance für einen Schlag direkt danach
             this[k].armed = true; this[k].firedAt = this[k].prevFiredAt ?? -1e9;
+            // Startpunkt neu setzen: der (schon halb gestreckte) Arm muss von hier aus neu ausholen,
+            // sonst zählt dieselbe Bewegung im nächsten Bild gleich noch einmal
+            // (nicht bei "Ellbogen unten": aus der abgesunkenen Führhand kommt oft direkt der Haken)
+            if (!guardSlide) { const A = this[k], last = A.buf[A.buf.length - 1]; A.buf = last ? [last] : []; }
             events.push({ k, kind: "undo", feat: f, why: weak ? "schwach" : guardSlide ? "Ellbogen unten" : "kaum gestreckt", gap: ev.gap });
             continue;
           }
@@ -1175,8 +1233,12 @@ function checkPosition(ex, now) {
   else el.classList.add("hidden");
   return warn;
 }
+const glitchState = {};
+let boxLm = null;
 function updateBox(lm, wl) {
   const now = performance.now();
+  ({ lm, wl } = holdGlitches(lm, wl, canvas.width, canvas.height, glitchState, now));
+  boxLm = lm;
   const ex = extractSides(lm, wl, canvas.width, canvas.height, swapState);
   checkPosition(ex, now);
   // Stehst du länger als 0,6 s ungünstig (seitlich / läufst zur Kamera), wird nicht gezählt
@@ -1467,10 +1529,11 @@ function loop() {
     if (res.landmarks && res.landmarks.length && res.worldLandmarks && res.worldLandmarks.length) {
       lastSeen = now;
       const lm = res.landmarks[0], wl = res.worldLandmarks[0];
-      drawPose(lm);
       recFrame(now, lm, wl, cdEnd && now < cdEnd);
+      boxLm = lm;
       if (countdownActive(now)) setStatus("Countdown läuft – noch wird nicht gezählt.");
       else if (mode === "pushup") updatePush(lm); else updateBox(lm, wl);
+      drawPose(boxLm);   // im Box-Modus mit den korrigierten Handpunkten (verdeckte Hand springt nicht)
     } else {
       recFrame(now, null, null, cdEnd && now < cdEnd);
     }
