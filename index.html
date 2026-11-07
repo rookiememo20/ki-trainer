@@ -91,7 +91,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>🥊 KI-Trainer <span class="ver">v8.9 · Push-ups & Schläge zählen</span></h1>
+  <h1>🥊 KI-Trainer <span class="ver">v9.0 · Push-ups & Schläge zählen</span></h1>
 
   <div class="tabs">
     <button class="tab active" data-mode="pushup">💪 Push-ups</button>
@@ -261,7 +261,7 @@
 </div>
 
 <script type="module">
-const APP_VER = "v8.9";
+const APP_VER = "v9.0";
 import { PoseLandmarker, FilesetResolver, DrawingUtils }
   from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
 
@@ -584,6 +584,13 @@ function classifyPunch(feat, hand, calib) {
       // Faust geht mindestens so weit quer wie bei deinem kalibrierten Haken → Haken
       // (in Kombis startet der Haken oft tiefer, dadurch wirkt er "aufwärts" wie ein Uppercut)
       else if (C.hook && C.hook.faIn - U.faIn >= 0.12 && feat.faIn >= C.hook.faIn - 0.05) best = "hook";
+      // Faust geht deutlich quer (viel mehr als bei deinem Uppercut) und Unterarm steht flacher als beim Uppercut → Haken
+      else if (C.hook && feat.faIn >= U.faIn + 0.3 && feat.faUp < U.faUp - 0.1) best = "hook";
+    }
+    if (best === "hook" && C.straight && C.hook && C.hook.faIn - C.straight.faIn >= 0.3 &&
+        feat.faIn < C.hook.faIn - 0.08 && feat.ext2 >= 0.9) {
+      // Arm im Bild voll gestreckt und Faust geht weniger quer als bei deinem Haken → gerader Schlag (Jab/Cross)
+      best = "straight";
     }
     if (best) return best;
   }
@@ -603,6 +610,11 @@ function buildCalibration(samples) {
   samples = samples.filter(s => {
     const gs = samples.filter(x => x.hand === s.hand).map(x => x.feat.G);
     return s.feat.G <= 2.2 * median(gs);
+  });
+  // Viel schwächer als die anderen Proben derselben Schlagart = Mitbewegung / Doppelzählung → nicht verwenden
+  samples = samples.filter(s => {
+    const gs = samples.filter(x => x.hand === s.hand && x.type === s.type).map(x => x.feat.G);
+    return gs.length < 2 || s.feat.G >= 0.6 * Math.max(...gs);
   });
   const cal = { L: {}, R: {}, rise: {} };
   for (const hand of ["L", "R"]) {
@@ -628,10 +640,16 @@ function buildCalibration(samples) {
     }
     cal.sd[k] = Math.max(0.08, Math.sqrt(ss / Math.max(1, n)));
   }
-  cal.v = 3;
+  cal.v = 4;
   return cal;
 }
 // Wie hoch dein Oberarm bei deinen echten Schlägen mindestens ist (niedrigster Wert über Jab/Haken/Uppercut)
+// Wie weit dein Arm im Bild bei deinen echten Schlägen mindestens gestreckt ist
+function e2RefOf(cal, hand) {
+  const C = cal && cal[hand]; if (!C) return null;
+  const vs = PTYPES.map(ty => C[ty] && C[ty].ext2).filter(v => v != null);
+  return vs.length ? Math.min(...vs) : null;
+}
 function uaRefOf(cal, hand) {
   const C = cal && cal[hand]; if (!C) return null;
   const vs = PTYPES.map(ty => C[ty] && C[ty].uaU).filter(v => v != null);
@@ -663,6 +681,9 @@ class PunchCounter {
           // kurz (< 0,2 s) nach einem Schlag der anderen Hand und ist nur knapp über der Schwelle → kein Schlag
           // Entscheidung erst am Ende der Bewegung (ein schneller Cross ist dann gestreckt / weit genug)
           if (t - other.firedAt < 300 && this[k].pending) { this[k].pending.suspect = true; this[k].pending.gap = t - other.firedAt; }
+          // auch umgekehrt: Die andere Hand ist kurz vorher losgegangen und noch nicht fertig ausgewertet
+          // (z. B. Führhand rutscht schon beim Eindrehen für den Cross mit, bevor die Schlaghand die Schwelle erreicht)
+          if (other.pending && t - other.firedAt < 250 && !other.pending.suspect) { other.pending.suspect = true; other.pending.gap = t - other.firedAt; }
           if (!this.first) this.first = t;
         } else if (ev.kind === "type" && ev.suspect) {
           // war nur Mitbewegung: kaum über der Schwelle und Arm nicht gestreckt → Zählung zurücknehmen
@@ -673,7 +694,9 @@ class PunchCounter {
           const weak = ev.gap < 200 && strength < 1.4 && Math.max(f.ext3, f.ext2) < 0.85;
           const uaLim = this[k].uaRef != null ? this[k].uaRef - 0.4 : -0.6;   // deutlich tiefer als bei deinen echten Schlägen
           const guardSlide = k === (S.stance === "southpaw" ? "R" : "L") && ev.gap < 300 && f.uaU < uaLim && Math.max(f.ext3, f.ext2) < 0.9 && !(f.faUp > 0.65 && f.upGain > 0.6);   // echter Uppercut bleibt
-          if (weak || guardSlide) {
+          // c) kurz (< 0,2 s) nach dem anderen Schlag, im Bild viel weniger gestreckt als jeder deiner echten Schläge → Mitbewegung
+          const flat = this[k].e2Ref != null && ev.gap < 200 && f.ext2 < Math.min(0.5, this[k].e2Ref - 0.2) && !(f.faUp > 0.65 && f.upGain > 0.6);
+          if (weak || guardSlide || flat) {
             this[k].count = Math.max(0, this[k].count - 1);
             events.push({ k, kind: "undo" });
             continue;
@@ -723,8 +746,19 @@ let calib = null;
 try { calib = JSON.parse(localStorage.getItem("boxCalib") || "null"); } catch (e) {}
 let calibOutdated = false;
 if (calib && (calib.v || 1) < 3) { calib = null; calibOutdated = true; }   // Kalibrierungen bis v8.7 wurden mit fehlerhafter Seitenzuordnung (v8.6) gemacht
+// v3 (v8.8/v8.9): mit den gespeicherten Proben neu rechnen, damit Ausreißer-Proben rausfallen; Schwelle bleibt
+if (calib && calib.v === 3 && calib.samples) {
+  try {
+    const re = buildCalibration(calib.samples.map(x => {
+      const feat = { G: x.G }; FEAT_KEYS.forEach((k, i) => feat[k] = x.f[i]); return { hand: x.hand, type: x.type, feat };
+    }));
+    re.rise = calib.rise; re.date = calib.date; re.samples = calib.samples;
+    calib = re;
+    localStorage.setItem("boxCalib", JSON.stringify(calib));
+  } catch (e) {}
+}
 function applyCalib() {
-  for (const k of ["L", "R"]) { box[k].rise = calib?.rise?.[k] || null; box[k].uaRef = uaRefOf(calib, k); }
+  for (const k of ["L", "R"]) { box[k].rise = calib?.rise?.[k] || null; box[k].uaRef = uaRefOf(calib, k); box[k].e2Ref = e2RefOf(calib, k); }
 }
 applyCalib();
 
@@ -953,7 +987,7 @@ function onTypedPunch(hand, feat, t) {
     PLOG.push(`${Math.round(t)} ${hand} – verworfen (Hand runtergenommen) ua(${f2(feat.uaF)},${f2(feat.uaIn)},${f2(feat.uaU)}) fa(${f2(feat.faF)},${f2(feat.faIn)},${f2(feat.faUp)})`);
     return;
   }
-  if (calibState) { calibSample(hand, feat); return; }
+  if (calibState) { calibSample(hand, feat, t); return; }
   const code = punchCode(type, hand, leadHand());
   typeCount[code]++;
   lastPunch[hand] = { code, feat };
@@ -988,16 +1022,21 @@ function startCalibration() {
   const code = CAL_STEPS[0];
   speak(`Kalibrierung. ${CAL_N} mal ${punchName(code, handOfCode(code))}`);
 }
-function calibSample(hand, feat) {
+function calibSample(hand, feat, t) {
   const code = CAL_STEPS[calibState.step];
   if (hand !== handOfCode(code)) return;        // andere Hand ignorieren
+  // gleich nach dem Schrittwechsel: Das ist noch eine Mitbewegung vom letzten Schlag → ignorieren
+  if (t - (calibState.stepT ?? -1e9) < 700) return;
+  // gleich nach der letzten Probe: derselbe Schlag doppelt erkannt (z. B. beim Zurückziehen) → ignorieren
+  if (t - (calibState.lastT ?? -1e9) < 400) return;
   const type = code <= 2 ? "straight" : code <= 4 ? "hook" : "upper";
   if (feat.G > 3.5) { feedback("Nicht erkannt – bitte nochmal", true); return; }   // Sprungwert → nicht verwenden
   calibState.samples.push({ hand, type, feat });
   calibState.got++;
+  calibState.lastT = t;
   beep(1100, 0.08, 0.25);
   if (calibState.got >= CAL_N) {
-    calibState.step++; calibState.got = 0;
+    calibState.step++; calibState.got = 0; calibState.stepT = t;
     if (calibState.step >= CAL_STEPS.length) { finishCalibration(); return; }
     const next = CAL_STEPS[calibState.step];
     speak(`${CAL_N} mal ${punchName(next, handOfCode(next))}`);
