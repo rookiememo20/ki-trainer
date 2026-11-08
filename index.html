@@ -253,6 +253,7 @@
               <option value="name">Ansage: Namen („Jab, Cross …“)</option>
               <option value="both">Ansage: Zahl + Name</option>
             </select>
+            <label class="hint" style="grid-column:1 / -1;display:flex;gap:8px;align-items:center;margin:0"><input type="checkbox" id="cRec"> ⏺ Aufnahme mitlaufen lassen (bis 4 Min., zum Auswerten)</label>
           </div>
           <button class="btn primary" id="comboBtn" style="width:100%">▶ Kombi-Trainer starten</button>
           <div class="stats s4" style="margin-top:10px">
@@ -359,7 +360,7 @@
 </div>
 
 <script type="module">
-const APP_VER = "v9.11";
+const APP_VER = "v9.12";
 import { PoseLandmarker, FilesetResolver, DrawingUtils }
   from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
 
@@ -1056,7 +1057,7 @@ async function copyReport() {
 
 // ---------- Testaufnahme: Körperpunkte jedes Bildes (kein Video) ----------
 const REC_IDX = [0, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24];
-const REC_MAX_MS = 150000;
+const REC_MAX_MS = 150000, REC_MAX_COMBO_MS = 240000;
 let rec = null, recDone = null;
 // Ablauf der Testaufnahme mit Sprachansagen (Zeiten in ms ab Ende des Countdowns)
 function buildRecScript(kind) {
@@ -1112,8 +1113,8 @@ function recFrame(now, lm, wl, cd) {
       if (c.want === "end") { rec.endAt = now + 1500; }
     }
   }
-  if (now - rec.t0 > REC_MAX_MS || (rec.endAt && now >= rec.endAt)) stopRec();
-  else { $("recBtn").textContent = `⏹ Aufnahme abbrechen`; $("recBtn2").textContent = `⏹ Aufnahme abbrechen`; }
+  if (now - rec.t0 > (rec.kind === "combo" ? REC_MAX_COMBO_MS : REC_MAX_MS) || (rec.endAt && now >= rec.endAt)) stopRec();
+  else if (rec.kind !== "combo") { $("recBtn").textContent = `⏹ Aufnahme abbrechen`; $("recBtn2").textContent = `⏹ Aufnahme abbrechen`; }
 }
 function startRec(kind) {
   if (place.active) stopPlace(false);
@@ -1121,7 +1122,7 @@ function startRec(kind) {
   if (mode !== "box") { feedback("Erst auf „Boxen“ wechseln", true); return; }
   if (calibState) stopCalibration(true);
   if (combo.active) stopCombo();
-  rec = { t0: performance.now(), frames: [], cues: [], kind: kind || "123", script: buildRecScript(kind), ci: 0, sStart: null, endAt: null };
+  rec = { t0: performance.now(), frames: [], cues: [], results: [], kind: kind || "123", script: buildRecScript(kind), ci: 0, sStart: null, endAt: null };
   recDone = null; $("recSaveBtn").classList.add("hidden");
   recSpeak("Gleich geht es los. Hör einfach auf die Ansagen.");
   startCountdown();
@@ -1132,7 +1133,7 @@ function stopRec() {
   if (!rec) return;
   recDone = { app: APP_VER, kind: rec.kind, date: new Date().toISOString(), stance: S.stance, model: S.model, W: canvas.width, H: canvas.height,
               idx: REC_IDX, calib: calib ? { ...calib } : null, counts: { L: box.L.count, R: box.R.count }, typeCount: { ...typeCount },
-              cues: rec.cues, complete: rec.ci >= rec.script.length, frames: rec.frames };
+              cues: rec.cues, results: rec.results, complete: rec.kind === "combo" || rec.ci >= rec.script.length, frames: rec.frames };
   rec = null;
   setTimeout(() => { if (!rec && !calibState && !combo.active) coach("Fertig ✅", "jetzt „💾 Aufnahme speichern“ antippen", "good"); }, 50);
   $("recBtn").textContent = "⏺ Testaufnahme mit Ansagen";
@@ -1145,7 +1146,7 @@ function stopRec() {
 }
 async function saveRec() {
   if (!recDone) return;
-  const name = `ki-trainer-aufnahme${recDone.kind === "1212" ? "-1212" : ""}-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")}.json`;
+  const name = `ki-trainer-aufnahme${recDone.kind === "1212" ? "-1212" : recDone.kind === "combo" ? "-kombi" : ""}-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")}.json`;
   const blob = new Blob([JSON.stringify(recDone)], { type: "application/json" });
   try {
     const file = new File([blob], name, { type: "application/json" });
@@ -1496,6 +1497,7 @@ function startCombo() {
   if (!running) { feedback("Erst die Kamera starten", true); return; }
   if (combo.active) { stopCombo(); return; }
   if (calibState) stopCalibration(true);
+  if (rec) stopRec();
   combo.active = true; combo.stats = { n: 0, perfect: 0, hands: 0 };
   // Sprachausgabe hier (direkt beim Antippen) einmal starten – sonst blockiert das iPhone spätere Ansagen
   if (!S.sound) { S.sound = true; $("soundBtn").textContent = "🔊 Ton an"; }
@@ -1504,13 +1506,20 @@ function startCombo() {
   combo.phase = "wait"; combo.nextAt = performance.now() + cd + 600;
   clearInterval(combo.timer); combo.timer = setInterval(comboTick, 50);
   $("comboBtn").textContent = "⏹ Kombi-Trainer stoppen";
+  if ($("cRec").checked) {
+    rec = { t0: performance.now(), frames: [], cues: [], results: [], kind: "combo", script: [], ci: 0, sStart: null, endAt: null };
+    recDone = null; $("recSaveBtn").classList.add("hidden");
+    $("recInfo").textContent = "Aufnahme läuft mit dem Kombi-Trainer. Beim Stoppen kannst du sie speichern.";
+  }
   updateComboStats();
 }
 function stopCombo() {
+  const wasRec = rec && rec.kind === "combo";
   combo.active = false; combo.phase = "idle"; clearInterval(combo.timer);
   try { speechSynthesis.cancel(); } catch (e) {}
   coach(null);
   $("comboBtn").textContent = "▶ Kombi-Trainer starten";
+  if (wasRec) { stopRec(); coach("Aufnahme fertig ✅", "unten „💾 Aufnahme speichern“ antippen", "good"); }
 }
 function comboTick() {
   const now = performance.now();
@@ -1535,6 +1544,7 @@ function announceCombo(now) {
              : mode === "name" ? names.join(", ")
              : combo.target.map((c, i) => `${NUMWORD[c]}, ${names[i]}`).join(". ");
   combo.phase = "listen";
+  if (rec && rec.kind === "combo") rec.cues.push([Math.round(now - rec.t0), combo.target.join(""), combo.target.join("-")]);
   // Zeit zum Schlagen: Ansage + ca. 0,6 s pro Schlag + Reserve
   combo.listenUntil = now + (mode === "both" ? 900 : 450) * combo.target.length + 600 * combo.target.length + 1500;
   speak(text);
@@ -1548,6 +1558,7 @@ function comboPunch(code, t) {
 }
 function evaluateCombo(now) {
   const res = judgeCombo(combo.target, combo.got);
+  if (rec && rec.kind === "combo") rec.results.push([Math.round(now - rec.t0), combo.target.join(""), combo.got.join(""), res]);
   combo.stats.n++;
   if (res === "perfect") {
     combo.stats.perfect++;
