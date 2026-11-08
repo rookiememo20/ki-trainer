@@ -365,7 +365,7 @@
 </div>
 
 <script type="module">
-const APP_VER = "v9.13";
+const APP_VER = "v9.14";
 import { PoseLandmarker, FilesetResolver, DrawingUtils }
   from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
 
@@ -759,6 +759,8 @@ function classifyPunch(feat, hand, calib, leadH = "L") {
     // Schlaghand: "Haken", bei dem die Faust sehr weit nach oben geht und der Unterarm steil steht → Uppercut
     // (deine echten rechten Haken heben die Faust höchstens um 0,8, deine Uppercuts um 1,2)
     if (!lead && best === "hook" && C.upper && feat.upGain >= 1.0 && feat.faUp >= 0.45) best = "upper";
+    // Führhand: Unterarm fast senkrecht (faUp >= 0.8) und kaum quer (faIn <= 0.45) = Uppercut, auch wenn der Oberarm wie bei einem Haken steht (Kombi-Aufnahme 6)
+    if (lead && best === "hook" && C.upper && feat.faUp >= 0.8 && feat.faIn <= 0.45) best = "upper";
     if (best === "hook" && C.straight && C.hook && C.hook.faIn - C.straight.faIn >= 0.3 &&
         feat.faIn < C.hook.faIn - 0.08 && feat.ext2 >= 0.9) {
       // Arm im Bild voll gestreckt und Faust geht weniger quer als bei deinem Haken → gerader Schlag (Jab/Cross)
