@@ -246,6 +246,8 @@
               <option value="2" selected>Mittel (2–4)</option>
               <option value="3">Profi (4–6)</option>
               <option value="4">Nur 1 & 2</option>
+              <option value="5">Neu: Körper, Step back, Doppel-Jab</option>
+              <option value="6">Doppel-Jab üben</option>
             </select>
             <select id="cPause">
               <option value="1.5">Pause 1,5 s</option>
@@ -307,6 +309,7 @@
             <button class="btn" id="recBtn">⏺ Testaufnahme mit Ansagen</button>
             <button class="btn" id="recBtn2">⏺ Aufnahme 1-2-1-2</button>
             <button class="btn" id="recBtn3">⏺ Aufnahme Spielen &amp; Finten</button>
+            <button class="btn" id="recBtn4">⏺ Aufnahme Körper, Step back &amp; Doppel-Jab</button>
             <button class="btn hidden" id="recSaveBtn">💾 Aufnahme speichern</button>
             <button class="btn" id="copyBtn">📋 Messwerte kopieren</button>
           </div>
@@ -366,7 +369,7 @@
 </div>
 
 <script type="module">
-const APP_VER = "v9.18";
+const APP_VER = "v9.19";
 import { PoseLandmarker, FilesetResolver, DrawingUtils }
   from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
 
@@ -521,6 +524,12 @@ function extractSides(lm, wl, W, H, st) {
   const hp2 = { x: (P2(J(23)).x + P2(J(24)).x) / 2, y: (P2(J(23)).y + P2(J(24)).y) / 2 };
   const torso2 = Math.max(20, Math.hypot(sh2.x - hp2.x, sh2.y - hp2.y));   // Rumpflänge im Bild (Pixel)
   const sw = Math.max(0.15, vlen(vsub(wl[J(11)], wl[J(12)])));
+  // Standhöhe der letzten 2 s (Median): Schulterhöhe und Rumpflänge im Bild. Ein Körpertreffer mit
+  // Abtauchen in den Knien senkt auch die Schultern – gemessen gegen den normalen Stand bleibt er erkennbar.
+  const ref = st.ref = st.ref || { sh: [], to: [] };
+  ref.sh.push(sh2.y); ref.to.push(torso2);
+  if (ref.sh.length > 60) { ref.sh.shift(); ref.to.shift(); }
+  const refSh = median(ref.sh), refTo = median(ref.to);
   const sides = {};
   for (const [k, s, e, w, sign] of [["L", 11, 13, 15, -1], ["R", 12, 14, 16, 1]]) {
     const S_ = J(s), E_ = J(e), W_ = J(w);
@@ -539,10 +548,15 @@ function extractSides(lm, wl, W, H, st) {
       faF: vdot(fa, F.f), faIn: sign * vdot(fa, F.l), faUp: vdot(fa, F.u),
       v: Math.min(visI(S_), visI(E_), visI(W_)),
       q: { x: (P2(W_).x - P2(S_).x) / torso2, y: (P2(W_).y - P2(S_).y) / torso2 },   // Faust rel. Schulter im Bild
-      pos: { x: lm[W_].x, y: lm[W_].y }
+      pos: { x: lm[W_].x, y: lm[W_].y },
+      hh: (P2(W_).y - sh2.y) / Math.max(20, hp2.y - sh2.y),    // Faust-Höhe im Bild: 0 = Schulterlinie, 1 = Hüftlinie
+      hhA: (P2(W_).y - refSh) / Math.max(20, refTo)            // dasselbe, gemessen gegen deinen normalen Stand
     };
   }
-  return { sw, sides, swapped };
+  const nose2 = P2(0);
+  const noseHip = Math.hypot(nose2.x - hp2.x, nose2.y - hp2.y);
+  const hipOk = Math.min(visI(J(23)), visI(J(24)), visI(J(11)), visI(J(12))) > 0.5;
+  return { sw, sides, swapped, torso2, refTo, noseHip, hipOk };
 }
 
 // upGain = wie weit die Faust im Schlag von ihrem tiefsten Punkt nach OBEN gegangen ist (Schulterbreiten)
@@ -557,7 +571,7 @@ class PunchArm {
   reset() {
     this.count = 0; this.armed = true; this.buf = []; this.peak = 0; this.firedAt = -1e9;
     this.sig = 0; this.raw = []; this.guard = null; this.stillSince = null;
-    this.prevP = null; this.prevT = null; this.pending = null; this.diag = []; this.lastFeat = null;
+    this.prevP = null; this.prevT = null; this.pending = null; this.diag = []; this.lastFeat = null; this.dbl = null; this.sf = null;
   }
   // Auslösen zurücknehmen (war Mitbewegung / Hand-Tausch): Hand sofort wieder bereit
   cancelFire() {
@@ -575,6 +589,7 @@ class PunchArm {
     // Armhaltung im Treffpunkt: Median über alle Bilder nahe der weitesten Stelle (robust gegen Rauschen,
     // auch wenn der Schlag nur 2–3 Bilder lang in Endposition ist)
     const top = P.frames.filter(f => f.D >= P.D * 0.8);
+    if (top.length >= 2 && top[0].side.hh != null) { P.feat.hh = median(top.map(f => f.side.hh)); P.feat.hhA = median(top.map(f => f.side.hhA)); }
     if (top.length >= 2) for (const k of FEAT_KEYS) {
       if (P.feat[k] == null || top[0].side[k] == null) continue;
       P.feat[k] = median(top.map(f => f.side[k]));
@@ -584,7 +599,8 @@ class PunchArm {
     const path = { pIn: (b.in - a.in) / sw, pF: (b.f - a.f) / sw, pU: (b.u - a.u) / sw, eU: (b.eu - a.eu) / sw, eIn: (b.ein - a.ein) / sw };
     const feat = { ...P.feat, upGain: P.up, fwdGain: P.fw, upShare, gain: P.gain, ...path };
     this.lastFeat = feat;
-    return { kind: "type", feat, suspect: !!P.suspect, gap: P.gap ?? 999 };
+    feat.back = P.back ?? null; feat.backGap = P.backGap ?? null; feat.dj = !!P.dj;
+    return { kind: "type", feat, suspect: !!P.suspect, gap: P.gap ?? 999, dj: !!P.dj };
   }
   recent() {   // Anzeige: höchste Weite der letzten 1,5 s (1 = reicht)
     let r = 0;
@@ -639,6 +655,12 @@ class PunchArm {
       } else if (t - this.stillSince > 1500) this.guard = { ...p };   // neue Deckungshaltung
     }
     const G = dP(p, this.guard) / sw;     // Abstand von der Deckung in Schulterbreiten
+    // Rückweg nach einem Schlag verfolgen: weiteste Stelle, danach tiefster Punkt (wie weit ging die Faust zurück?)
+    if (this.sf) {
+      if (t - this.sf.t > 1200) this.sf = null;
+      else if (!this.sf.down) { if (G > this.sf.peak) this.sf.peak = G; else if (G < this.sf.peak * 0.85) { this.sf.down = true; this.sf.trough = G; } }
+      else this.sf.trough = Math.min(this.sf.trough, G);
+    }
 
     this.buf.push({ t, G, u: p.u, f: p.f, p });
     while (this.buf.length && t - this.buf[0].t > 450) this.buf.shift();
@@ -648,7 +670,7 @@ class PunchArm {
     this.diag.push({ t, r: this.sig });
     while (this.diag.length && t - this.diag[0].t > 1500) this.diag.shift();
 
-    const snap = () => ({ ...cur, G, handH: p.u / sw });   // handH: Faust über(+)/unter(−) der Schulter
+    const snap = () => ({ ...cur, G, handH: p.u / sw, hh: m(r => r.hh ?? 0), hhA: m(r => r.hhA ?? 0) });   // handH: Faust über(+)/unter(−) der Schulter
     // Schlag verfolgen: Armhaltung am weitesten Punkt (von der Deckung aus), dazu über den ganzen
     // Schlag hinweg, wie weit die Faust von ihrem tiefsten Punkt nach oben bzw. nach vorne ging
     if (this.pending) {
@@ -682,7 +704,20 @@ class PunchArm {
         // frühestens 0,1 s danach: so schnell kann kein echter neuer Schlag kommen (deine: ab 0,2 s)
         else if (t - this.reStart.t >= 100 && dP(p, this.reStart.p0) / sw >= rise && (cur.ext2 >= 0.6 || cur.faIn >= 0.6 || cur.faUp >= 0.7) && cur.uaU >= (this.uaRef ?? -0.25) - 0.35) re = true;
       }
-      if ((G - base >= rise || fast || re) && t - this.firedAt > 140) {
+      // Doppel-Jab (nur wenn der Kombi-Trainer gerade einen erwartet): Die Faust kam nach dem Jab nur ein Stück
+      // zurück und schlägt von dort gestreckt nochmal. Gemessen ab dem tiefsten Punkt des Rückwegs.
+      let dj = false;
+      if (this.dbl) {
+        this.dbl.trough = Math.min(this.dbl.trough, G);
+        if (!S.djActive || t - this.firedAt > 700 || G < rise * 0.5 || this.key !== (S.stance === "southpaw" ? "R" : "L")) this.dbl = null;
+        else dj = t - this.firedAt > 200 && this.dbl.peak - this.dbl.trough >= rise * 0.3
+                  && G - this.dbl.trough >= rise * 0.35 && cur.ext3 >= 0.85;
+      }
+      if ((G - base >= rise || fast || re || dj) && t - this.firedAt > 140) {
+        const onlyDj = dj && !(G - base >= rise || fast || re);
+        this.dbl = null;
+        const back = this.sf && this.sf.down ? { frac: Math.max(0, Math.min(1, (this.sf.peak - this.sf.trough) / (this.sf.peak || 1))), gap: t - this.sf.t } : null;
+        this.sf = { t, peak: G, down: false, trough: G };
         if (this.pending) out.push(this.finishPending());
         this.prevFiredAt = this.firedAt;
         this.armed = false; this.peak = G; this.firedAt = t; this.count++;
@@ -693,9 +728,11 @@ class PunchArm {
           if (b.G < gMin && b.p) { gMin = b.G; startP = b.p; }       // Startpunkt = ruhigster Punkt vor dem Schlag
         }
         if (re) { startP = this.reStart.p0; uMin = Math.min(uMin, startP.u); fMin = Math.min(fMin, startP.f); this.reStart = null; }
+        if (onlyDj) startP = { ...this.guard };   // Doppel-Jab: ab der Deckung messen (sonst liegt der weiteste Punkt auf dem Rückweg)
         this.pending = { t0: t, G, feat: snap(), uMin, fMin, up: (p.u - uMin) / sw, fw: (p.f - fMin) / sw, base, gain: G - base,
                          startP, endP: p, sw, D: dP(p, startP) / sw, frames: [{ D: dP(p, startP) / sw, side }],
-                         vUp: Math.max(vUp, this.lastVUp || 0), vFwd: Math.max(vFwd, this.lastVFwd || 0) };
+                         vUp: Math.max(vUp, this.lastVUp || 0), vFwd: Math.max(vFwd, this.lastVFwd || 0),
+                         dj: onlyDj, back: back ? back.frac : null, backGap: back ? back.gap : null };
         out.push({ kind: "hit" });
       }
     } else {
@@ -703,6 +740,7 @@ class PunchArm {
       // wieder bereit, sobald die Faust deutlich zurückkommt (oder nach 1,2 s)
       if ((this.peak - G >= rise * 0.35 && t - this.firedAt > 100) || t - this.firedAt > 1200) {
         this.armed = true;
+        this.dbl = S.djActive ? { peak: this.peak, trough: G } : null;
         this.buf = [{ t, G, u: p.u, f: p.f, p }];
       }
     }
@@ -868,7 +906,7 @@ function punchCode(type, hand, lead) {
 }
 
 class PunchCounter {
-  constructor() { this.L = new PunchArm(); this.R = new PunchArm(); this.swRef = null; this.first = null; }
+  constructor() { this.L = new PunchArm(); this.R = new PunchArm(); this.L.key = "L"; this.R.key = "R"; this.swRef = null; this.first = null; }
   reset() { this.L.reset(); this.R.reset(); this.swRef = null; this.first = null; }
   get total() { return this.L.count + this.R.count; }
   update(sw, sides, t, S) {
@@ -930,6 +968,35 @@ function judgeCombo(target, got, lead) {
   if (got.length === target.length && got.every((c, i) => handOf(c) === handOf(target[i]))) return "hands";
   return "wrong";
 }
+// Körpertreffer: Faust im Treffpunkt tiefer als 0,2 zwischen Schulter- und Hüftlinie (gegen den aktuellen
+// Oberkörper ODER gegen deinen normalen Stand). Deine Kopftreffer (8 Aufnahmen, 395 Schläge): fast alle < 0,05.
+const BODY_H = 0.2;
+const isBodyShot = (code, feat) => code <= 4 && Math.max(feat.hh ?? -9, feat.hhA ?? -9) >= BODY_H;
+// Step back: Du wirst im Bild kleiner (Rumpflänge UND Nase–Hüfte) und bleibst mind. 0,4 s kleiner.
+// Beim normalen Boxen (8 Aufnahmen, 40 000 Bilder) fiel die Rumpflänge so nie unter 89,5 %.
+class StepBack {
+  constructor() { this.thTorso = 0.9; this.thNose = 0.93; this.q = 0.75; this.reset(); }
+  reset() { this.raw = []; this.sm = []; this.last = -1e9; }
+  update(t, torso, noseHip, ok) {
+    if (!ok || (this.raw.length && t - this.raw[this.raw.length - 1].t > 300)) { this.raw = []; this.sm = []; if (!ok) return null; }
+    this.raw.push({ t, a: torso, b: noseHip });
+    if (this.raw.length > 5) this.raw.shift();
+    this.sm.push({ t, a: median(this.raw.map(r => r.a)), b: median(this.raw.map(r => r.b)) });
+    while (this.sm.length && t - this.sm[0].t > 2100) this.sm.shift();
+    // Kandidat: Bild vor 0,4 s
+    let i = this.sm.length - 1; while (i > 0 && t - this.sm[i].t < 400) i--;
+    if (t - this.sm[i].t < 380) return null;
+    const ti = this.sm[i].t, before = this.sm.filter(x => x.t < ti && ti - x.t <= 1500);
+    if (before.length < 10 || ti - this.last < 1200) return null;
+    // die nächsten 0,4 s: fast alle Bilder (75 %) deutlich kleiner als vorher
+    const after = this.sm.slice(i), qa = after.map(x => x.a).sort((x, y) => x - y), qb = after.map(x => x.b).sort((x, y) => x - y);
+    const q75 = v => v[Math.min(v.length - 1, Math.floor(v.length * this.q))];
+    const rA = q75(qa) / median(before.map(x => x.a)), rB = q75(qb) / median(before.map(x => x.b));
+    this.lastR = rA;
+    if (rA < this.thTorso && rB < this.thNose) { this.last = ti; return { t: ti, rA, rB }; }
+    return null;
+  }
+}
 // ===================== END-DETECTORS =====================
 
 const $ = id => document.getElementById(id);
@@ -946,6 +1013,19 @@ try { S.stance = localStorage.getItem("stance") || "orthodox"; } catch (e) {}
 const push = new PushCounter();
 let pushRecord = 0, armRef = null;
 const box = new PunchCounter();
+const stepBack = new StepBack();
+let stepCount = 0;
+function onStepBack(sb, now) {
+  stepCount++;
+  PLOG.push(`${Math.round(sb.t)} ↩ Step back (Rumpf ${f2(sb.rA)}, Nase–Hüfte ${f2(sb.rB)})`);
+  if (rec) (rec.steps || (rec.steps = [])).push([Math.round(sb.t - rec.t0), Math.round(sb.rA * 1000) / 1000, Math.round(sb.rB * 1000) / 1000]);
+  if (combo.active) comboStep(sb.t);
+  if (!calibState) {
+    $("bigLabel").textContent = "↩️ Step back";
+    clearTimeout(nameTimer);
+    nameTimer = setTimeout(() => { nameTimer = null; if (mode === "box") $("bigLabel").textContent = "Schläge"; }, 900);
+  }
+}
 box.round = { running: false, end: 0, startTotal: 0, timer: null };
 const swapState = {};
 const typeCount = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
@@ -1046,7 +1126,7 @@ function logFrame(t, ex, evs) {
 }
 function logPunch(t, hand, code, feat) {
   PLOG.push(`${Math.round(t)} ${hand} ${code} ${punchName(code, hand).padEnd(15)} G ${f2(feat.G)} e3 ${f2(feat.ext3)} e2 ${f2(feat.ext2)} ` +
-            `fa(${f2(feat.faF)},${f2(feat.faIn)},${f2(feat.faUp)}) ua(${f2(feat.uaF)},${f2(feat.uaIn)},${f2(feat.uaU)}) hoch ${f2(feat.upGain)} vor ${f2(feat.fwdGain)} anteil ${f2(feat.upShare)} weg(${f2(feat.pF)},${f2(feat.pIn)},${f2(feat.pU)}) ell(${f2(feat.eIn)},${f2(feat.eU)})`);
+            `fa(${f2(feat.faF)},${f2(feat.faIn)},${f2(feat.faUp)}) ua(${f2(feat.uaF)},${f2(feat.uaIn)},${f2(feat.uaU)}) hoch ${f2(feat.upGain)} vor ${f2(feat.fwdGain)} anteil ${f2(feat.upShare)} weg(${f2(feat.pF)},${f2(feat.pIn)},${f2(feat.pU)}) ell(${f2(feat.eIn)},${f2(feat.eU)}) höhe ${f2(feat.hh)} standhöhe ${f2(feat.hhA)}`);
   while (PLOG.length > 80) PLOG.shift();
 }
 function buildReport() {
@@ -1072,7 +1152,7 @@ async function copyReport() {
 }
 
 // ---------- Testaufnahme: Körperpunkte jedes Bildes (kein Video) ----------
-const REC_IDX = [0, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24];
+const REC_IDX = [0, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28];   // + Knie und Fußgelenke (für Footwork)
 const REC_MAX_MS = 150000, REC_MAX_COMBO_MS = 240000;
 let rec = null, recDone = null;
 // Ablauf der Testaufnahme mit Sprachansagen (Zeiten in ms ab Ende des Countdowns)
@@ -1081,6 +1161,7 @@ function buildRecScript(kind) {
   const cues = [];
   if (kind === "1212") return buildRecScript1212(cues);
   if (kind === "play") return buildRecScriptPlay(cues);
+  if (kind === "body") return buildRecScriptBody(cues);
   let t = 0;
   const add = (dt, say, big, small, want) => { cues.push({ at: t, say, big, small, want }); t += dt; };
   add(3500, "Zehn mal eins zwei drei. Nach jeder Ansage einmal.", "10× 1-2-3", "nach jeder Ansage einmal schlagen");
@@ -1104,6 +1185,28 @@ function buildRecScript1212(cues) {
   add(3500, "Jetzt so schnell wie im Training.", "Schnell", "so schnell wie beim Training");
   for (let i = 1; i <= 6; i++) add(3000, "eins zwei eins zwei", "1 – 2 – 1 – 2", `schnell ${i} von 6`, "1212");
   add(10000, "Jetzt acht Sekunden nur Deckung. Hüpfen, Kopf bewegen, nicht schlagen.", "🛡️ Nur Deckung", "hüpfen, Kopf bewegen – NICHT schlagen", "");
+  add(0, "Fertig. Danke!", "Fertig ✅", "jetzt „Aufnahme speichern“ antippen", "end");
+  return cues;
+}
+// Ablauf 4: Kopf & Körper, Step back, Doppel-Jab – zum Einstellen der neuen Erkennung
+function buildRecScriptBody(cues) {
+  let t = 0;
+  const add = (dt, say, big, small, want) => { cues.push({ at: t, say, big, small, want }); t += dt; };
+  add(4500, "Kopf und Körper, Step back und Doppel-Jab. Nach jeder Ansage einmal.", "Kopf · Körper · Step back", "nach jeder Ansage einmal");
+  const block = (intro, say, big, n, want, dt) => {
+    add(3000, intro, big, "gleich geht's los");
+    for (let i = 1; i <= n; i++) add(dt, say, big, `${i} von ${n}`, want);
+  };
+  block("Zuerst Jab zum Kopf.", "Jab Kopf", "1 · Jab zum Kopf", 4, "1", 2600);
+  block("Jetzt Jab zum Körper. Geh dabei in die Knie.", "Jab Körper", "1K · Jab zum Körper", 5, "1k", 2800);
+  block("Cross zum Körper.", "Cross Körper", "2K · Cross zum Körper", 5, "2k", 2800);
+  block("Leberhaken. Linker Haken zum Körper.", "Leberhaken", "3K · Leberhaken", 5, "3k", 3000);
+  block("Linker Haken zum Kopf.", "Haken Kopf", "3 · Haken zum Kopf", 4, "3", 2800);
+  block("Rechter Haken zum Körper.", "Rechter Haken Körper", "4K · rechter Haken zum Körper", 4, "4k", 3000);
+  block("Jetzt Step back. Ein deutlicher Schritt zurück, dann wieder vor.", "Step back", "↩️ Step back", 5, "S", 3600);
+  block("Jetzt Doppel-Jab. Nach dem ersten Jab nicht in die Deckung, direkt den zweiten.", "Doppel-Jab", "1-1 · Doppel-Jab", 5, "11", 3000);
+  block("Jetzt eins zwei, Step back, zwei.", "eins, zwei, Step back, zwei", "1 – 2 – SB – 2", 4, "12S2", 4200);
+  add(9000, "Jetzt acht Sekunden nur Deckung. Nicht schlagen.", "🛡️ Nur Deckung", "NICHT schlagen", "");
   add(0, "Fertig. Danke!", "Fertig ✅", "jetzt „Aufnahme speichern“ antippen", "end");
   return cues;
 }
@@ -1146,8 +1249,8 @@ function recFrame(now, lm, wl, cd) {
       if (c.want === "end") { rec.endAt = now + 1500; }
     }
   }
-  if (now - rec.t0 > (rec.kind === "combo" ? REC_MAX_COMBO_MS : REC_MAX_MS) || (rec.endAt && now >= rec.endAt)) stopRec();
-  else if (rec.kind !== "combo") { $("recBtn").textContent = `⏹ Aufnahme abbrechen`; $("recBtn2").textContent = `⏹ Aufnahme abbrechen`; $("recBtn3").textContent = `⏹ Aufnahme abbrechen`; }
+  if (now - rec.t0 > (rec.kind === "combo" ? REC_MAX_COMBO_MS : rec.kind === "body" ? 200000 : REC_MAX_MS) || (rec.endAt && now >= rec.endAt)) stopRec();
+  else if (rec.kind !== "combo") { $("recBtn").textContent = `⏹ Aufnahme abbrechen`; $("recBtn2").textContent = `⏹ Aufnahme abbrechen`; $("recBtn3").textContent = `⏹ Aufnahme abbrechen`; $("recBtn4").textContent = `⏹ Aufnahme abbrechen`; }
 }
 function startRec(kind) {
   if (place.active) stopPlace(false);
@@ -1159,19 +1262,20 @@ function startRec(kind) {
   recDone = null; $("recSaveBtn").classList.add("hidden");
   recSpeak("Gleich geht es los. Hör einfach auf die Ansagen.");
   startCountdown();
-  coach("Gleich geht's los", `hör auf die Ansagen – ca. ${kind === "1212" ? "1¼" : kind === "play" ? "1" : "1½"} Minuten`);
+  coach("Gleich geht's los", `hör auf die Ansagen – ca. ${kind === "1212" ? "1¼" : kind === "play" ? "1" : kind === "body" ? "2¾" : "1½"} Minuten`);
   $("recInfo").textContent = "Aufnahme läuft – einfach den Ansagen folgen. Am Ende stoppt sie von selbst.";
 }
 function stopRec() {
   if (!rec) return;
   recDone = { app: APP_VER, kind: rec.kind, date: new Date().toISOString(), stance: S.stance, model: S.model, W: canvas.width, H: canvas.height,
               idx: REC_IDX, calib: calib ? { ...calib } : null, counts: { L: box.L.count, R: box.R.count }, typeCount: { ...typeCount },
-              cues: rec.cues, results: rec.results, stanceLog: rec.stanceLog || [], complete: rec.kind === "combo" || rec.ci >= rec.script.length, frames: rec.frames };
+              cues: rec.cues, results: rec.results, stanceLog: rec.stanceLog || [], steps: rec.steps || [], complete: rec.kind === "combo" || rec.ci >= rec.script.length, frames: rec.frames };
   rec = null;
   setTimeout(() => { if (!rec && !calibState && !combo.active) coach("Fertig ✅", "jetzt „💾 Aufnahme speichern“ antippen", "good"); }, 50);
   $("recBtn").textContent = "⏺ Testaufnahme mit Ansagen";
   $("recBtn2").textContent = "⏺ Aufnahme 1-2-1-2";
   $("recBtn3").textContent = "⏺ Aufnahme Spielen & Finten";
+  $("recBtn4").textContent = "⏺ Aufnahme Körper, Step back & Doppel-Jab";
   $("recSaveBtn").classList.remove("hidden");
   $("recInfo").textContent = recDone.complete
     ? `Aufnahme fertig (${recDone.frames.length} Bilder). Tippe auf „Aufnahme speichern“ und schick mir die Datei hier im Chat (Büroklammer → Datei).`
@@ -1180,7 +1284,7 @@ function stopRec() {
 }
 async function saveRec() {
   if (!recDone) return;
-  const name = `ki-trainer-aufnahme${recDone.kind === "1212" ? "-1212" : recDone.kind === "combo" ? "-kombi" : recDone.kind === "play" ? "-finten" : ""}-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")}.json`;
+  const name = `ki-trainer-aufnahme${recDone.kind === "1212" ? "-1212" : recDone.kind === "combo" ? "-kombi" : recDone.kind === "play" ? "-finten" : recDone.kind === "body" ? "-koerper" : ""}-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")}.json`;
   const blob = new Blob([JSON.stringify(recDone)], { type: "application/json" });
   try {
     const file = new File([blob], name, { type: "application/json" });
@@ -1429,6 +1533,8 @@ function updateBox(lm, wl) {
     setStatus("Zählpause – stell dich wieder in Position.");
     return;
   }
+  const sb = stepBack.update(now, ex.torso2, ex.noseHip, ex.hipOk);
+  if (sb) onStepBack(sb, now);
   const evs = box.update(ex.sw, ex.sides, now, S);
   for (const ev of evs) {
     if (ev.kind === "hit") beep(ev.k === "L" ? 620 : 900, 0.06);
@@ -1449,7 +1555,8 @@ let nameTimer = null;
 const lastRealPunch = { L: -1e9, R: -1e9 };
 const guardDrops = { L: 0, R: 0 };
 function onTypedPunch(hand, feat, t) {
-  const type = classifyPunch(feat, hand, calib, leadHand());
+  let type = classifyPunch(feat, hand, calib, leadHand());
+  if (feat.dj && type !== "straight") type = "none";   // nur über die Doppel-Jab-Regel ausgelöst, aber kein Jab
   if (type === "none") {                               // Hände runtergenommen → Zählung zurücknehmen
     box[hand].count = Math.max(0, box[hand].count - 1);
     // Zweite Chance: schlägt die Hand direkt aus dieser Position heraus (z. B. Haken aus der abgesunkenen Hand)
@@ -1470,9 +1577,10 @@ function onTypedPunch(hand, feat, t) {
   lastPunch[hand] = { code, feat };
   lastRealPunch[hand] = t;
   logPunch(t, hand, code, feat);
-  if (combo.active) comboPunch(code, t);
+  const body = isBodyShot(code, feat);
+  if (combo.active) comboPunch(code, t, feat, body);
   // Name des Schlags kurz unter der großen Zahl anzeigen
-  $("bigLabel").textContent = `${code} · ${punchName(code, hand)}`;
+  $("bigLabel").textContent = `${code} · ${punchName(code, hand)}${body ? " · Körper" : ""}`;
   clearTimeout(nameTimer);
   nameTimer = setTimeout(() => { nameTimer = null; if (mode === "box") $("bigLabel").textContent = "Schläge"; }, 900);
 }
@@ -1536,7 +1644,7 @@ function finishCalibration() {
 function stopCalibration(cancelled) {
   calibState = null; S.riseScale = 1;
   applyCalib();
-  box.reset(); for (const k in typeCount) typeCount[k] = 0; lastPunch.L = lastPunch.R = null;
+  box.reset(); stepBack.reset(); for (const k in typeCount) typeCount[k] = 0; lastPunch.L = lastPunch.R = null;
   $("calBtn").textContent = "🎯 Kalibrieren";
   if (cancelled) { coach(null); feedback("Kalibrierung abgebrochen", true); }
   updateCalInfo();
@@ -1550,12 +1658,33 @@ function updateCalInfo() {
 }
 
 // ---------- Kombi-Trainer ----------
+// Schreibweise: Zahl = Schlag zum Kopf, "k" = zum Körper (z. B. "3k" = Leberhaken),
+// "D" = Doppel-Jab (zweiter Jab direkt hinterher, ohne zurück in die Deckung), "S" = Step back
 const COMBOS = {
   1: ["1", "1-1", "1-2", "1-1-2", "2-1", "1-2-1", "2"],
-  2: ["1-2-3", "1-2-3-2", "3-2", "1-6-3-2", "5-2", "1-2-5-2", "1-1-2-3", "2-3-2", "1-2-1-2"],
+  2: ["1-2-3", "1-2-3-2", "3-2", "1-6-3-2", "5-2", "1-2-5-2", "1-1-2-3", "2-3-2", "1-2-1-2", "2-5-2"],
   3: ["1-2-3-2-5", "1-2-5-6-3", "3-4-3-2", "1-2-3-6-3-2", "5-6-5-2-3", "1-1-2-3-2", "1-2-3-4-5-6"],
-  4: ["1", "1-1", "1-2", "1-1-2", "1-2-1-2", "2-1-2", "1-1-1-2"]
+  4: ["1", "1-1", "1-2", "1-1-2", "1-2-1-2", "2-1-2", "1-1-1-2"],
+  5: ["D", "D-2", "D-2-3", "2-5-2", "1-2-3k", "D-2k-3k-4", "1-2-S-2", "1-2-3k-3", "1-2k", "D-2-3k", "1-2-3-S"],
+  6: ["D", "D-2", "D-1-2", "1-D-2", "D-2-3", "D-2-1-2"]
 };
+// Kombi-Text → Liste von Bausteinen { code, body, dbl, step }
+function parseCombo(str) {
+  const out = [];
+  for (const tok of str.split("-")) {
+    if (tok === "S") out.push({ step: true });
+    else if (tok === "D") { out.push({ code: 1, body: false }); out.push({ code: 1, body: false, dbl: true }); }
+    else out.push({ code: Number(tok[0]), body: tok.length > 1 && tok[1] === "k" });
+  }
+  return out;
+}
+const DOUBLE_BACK_MAX = 0.7;   // Doppel-Jab: höchstens 70 % des Weges zurück in die Deckung (deine bisherigen 1-1: 63–84 %)
+function tokName(tk, hand) {
+  if (tk.step) return "Step back";
+  if (tk.body && tk.code === 3 && hand === "L") return "Leberhaken";
+  return punchName(tk.code, hand) + (tk.body ? " zum Körper" : "");
+}
+function tokShort(tk) { return tk.step ? "SB" : `${tk.code}${tk.body ? "K" : ""}`; }
 const NUMWORD = { 1: "eins", 2: "zwei", 3: "drei", 4: "vier", 5: "fünf", 6: "sechs" };
 const combo = { active: false, phase: "idle", target: [], got: [], lastStr: "", listenUntil: 0, nextAt: 0,
                 lastPunchT: 0, timer: null, stats: { n: 0, perfect: 0, hands: 0 } };
@@ -1594,7 +1723,7 @@ function comboTick() {
   if (combo.phase === "wait" && now >= combo.nextAt) announceCombo(now);
   else if (combo.phase === "listen") {
     const full = combo.got.length >= combo.target.length;
-    if (now >= combo.listenUntil || (full && now - combo.lastPunchT > 500)) evaluateCombo(now);
+    if (now >= combo.listenUntil || (full && now - combo.lastPunchT > ((combo.spec || []).some(x => x.step) ? 1100 : 500))) evaluateCombo(now);   // Step back wird erst nach 0,4 s erkannt
   } else if (combo.phase === "result" && now >= combo.nextAt) combo.phase = "wait";
 }
 function announceCombo(now) {
@@ -1602,37 +1731,77 @@ function announceCombo(now) {
   let str;
   do { str = list[Math.floor(Math.random() * list.length)]; } while (list.length > 1 && str === combo.lastStr);
   combo.lastStr = str;
-  combo.target = str.split("-").map(Number);
-  combo.got = [];
-  const names = combo.target.map(c => punchName(c, handOfCode(c)));
-  coach(combo.target.join(" – "), names.join(" · "));
+  combo.spec = parseCombo(str);
+  combo.target = combo.spec.filter(x => !x.step).map(x => x.code);
+  combo.got = []; combo.gotInfo = []; combo.steps = [];
+  // Doppel-Jab-Regel nur bis zum letzten Doppel-Jab der Kombi aktiv
+  combo.dblEnd = combo.spec.filter(x => !x.step).reduce((m, x, i) => x.dbl ? i + 1 : m, 0);
+  S.djActive = combo.dblEnd > 0;
+  // Ansage: Bausteine; ein Doppel-Jab ("D") wird als ein Wort angesagt
+  const groups = [];
+  for (const tk of combo.spec) { if (tk.dbl) groups[groups.length - 1].dbl = true; else groups.push({ ...tk }); }
+  const gName = g => g.dbl ? "Doppel-Jab" : tokName(g, g.step ? null : handOfCode(g.code));
+  const gNum = g => g.dbl ? "Doppel eins" : g.step ? "Step back" : `${NUMWORD[g.code]}${g.body ? " Körper" : ""}`;
+  const names = groups.map(gName);
+  combo.showBig = groups.map(g => g.dbl ? "1-1" : tokShort(g)).join(" – ");
+  coach(combo.showBig, names.join(" · "));
   const mode = $("cCall").value;
-  const text = mode === "num" ? combo.target.map(c => NUMWORD[c]).join(", ")
+  const text = mode === "num" ? groups.map(gNum).join(", ")
              : mode === "name" ? names.join(", ")
-             : combo.target.map((c, i) => `${NUMWORD[c]}, ${names[i]}`).join(". ");
+             : groups.map(g => (g.dbl || g.step) ? gName(g) : `${gNum(g)}, ${gName(g)}`).join(". ");
   combo.phase = "listen";
   if (rec && rec.kind === "combo") rec.cues.push([Math.round(now - rec.t0), combo.target.join(""), combo.target.join("-")]);
   // Zeit zum Schlagen: Ansage + ca. 0,6 s pro Schlag + Reserve
-  combo.listenUntil = now + (mode === "both" ? 900 : 450) * combo.target.length + 600 * combo.target.length + 3000;   // +1,5 s mehr Reaktionszeit (Aufnahmen: du schlägst oft erst 3–4 s nach der Ansage)
+  combo.listenUntil = now + (mode === "both" ? 900 : 450) * groups.length + 600 * combo.spec.length + 3000;   // +1,5 s mehr Reaktionszeit (Aufnahmen: du schlägst oft erst 3–4 s nach der Ansage)
   speak(text);
 }
-function comboPunch(code, t) {
+function comboPunch(code, t, feat = {}, body = false) {
   if (combo.phase !== "listen") return;
   combo.got.push(code);
+  combo.gotInfo.push({ t: t - 250, body, back: feat.back ?? null, backGap: feat.backGap ?? null });   // ~Zeitpunkt des Schlags
   combo.lastPunchT = t;
+  if (combo.got.length >= (combo.dblEnd || 0)) S.djActive = false;
   const marks = combo.target.map((c, i) => i < combo.got.length ? (combo.got[i] === c ? "✓" : "✗") : "·").join(" ");
-  coach(combo.target.join(" – "), marks);
+  coach(combo.showBig || combo.target.join(" – "), marks);
+}
+function comboStep(t) {
+  if (combo.phase !== "listen") return;
+  combo.steps.push(t);
+  combo.lastPunchT = Math.max(combo.lastPunchT, t + 400);
+}
+// Zusatz-Prüfungen der Kombi: Kopf/Körper, Doppel-Jab ohne Deckung, Step back an der richtigen Stelle
+function comboExtras(spec, got, info, steps) {
+  const probs = [];
+  const punches = spec.filter(x => !x.step);
+  punches.forEach((tk, i) => {
+    if (got[i] !== tk.code || !info[i]) return;
+    if (tk.code <= 4 && tk.body !== info[i].body) probs.push(tk.body ? `${tokShort(tk)}: zu hoch – zum Körper!` : `${tk.code}: zu tief – zum Kopf!`);
+    if (tk.dbl && info[i].back != null && info[i].back > DOUBLE_BACK_MAX)
+      probs.push(`Doppel-Jab: Hand ging ${Math.round(info[i].back * 100)} % zurück – direkt nachschlagen`);
+  });
+  let pi = 0;
+  spec.forEach(tk => {
+    if (!tk.step) { pi++; return; }
+    const a = pi > 0 && info[pi - 1] ? info[pi - 1].t - 300 : -Infinity, b = info[pi] ? info[pi].t + 300 : Infinity;
+    if (!steps.some(st => st >= a && st <= b)) probs.push("Step back nicht erkannt");
+  });
+  return probs;
 }
 function evaluateCombo(now) {
-  const res = judgeCombo(combo.target, combo.got);
-  if (rec && rec.kind === "combo") rec.results.push([Math.round(now - rec.t0), combo.target.join(""), combo.got.join(""), res]);
+  S.djActive = false;
+  let res = judgeCombo(combo.target, combo.got);
+  const probs = res === "perfect" ? comboExtras(combo.spec || [], combo.got, combo.gotInfo || [], combo.steps || []) : [];
+  if (probs.length) res = "hands";
+  if (rec && rec.kind === "combo") rec.results.push([Math.round(now - rec.t0), combo.target.join(""), combo.got.join(""), res, combo.lastStr,
+    (combo.gotInfo || []).map(x => [x.body ? 1 : 0, x.back == null ? null : Math.round(x.back * 100)]), (combo.steps || []).map(x => Math.round(x - rec.t0)), probs]);
   combo.stats.n++;
   if (res === "perfect") {
     combo.stats.perfect++;
-    coach("✅ Sauber!", combo.target.join(" – "), "good"); beep(1200, 0.12, 0.25); speak("Sauber");
+    coach("✅ Sauber!", combo.showBig || combo.target.join(" – "), "good"); beep(1200, 0.12, 0.25); speak("Sauber");
   } else if (res === "hands") {
     combo.stats.hands++;
-    coach("🟡 Fast!", `Hände richtig · erkannt: ${combo.got.join(" – ")}`, "mid"); beep(700, 0.12, 0.2); speak("Fast");
+    if (probs.length) { coach("🟡 Fast!", probs.join(" · "), "mid"); beep(700, 0.12, 0.2); speak("Fast. " + probs[0].replace(/^[0-9K]+: /, "").replace(" – ", ", ")); }
+    else { coach("🟡 Fast!", `Hände richtig · erkannt: ${combo.got.join(" – ")}`, "mid"); beep(700, 0.12, 0.2); speak("Fast"); }
   } else {
     coach("❌ Nochmal", combo.got.length ? `erkannt: ${combo.got.join(" – ")} · gefordert: ${combo.target.join(" – ")}` : "kein Schlag erkannt", "bad");
     beep(260, 0.2, 0.2); speak("Nochmal");
@@ -1862,7 +2031,7 @@ $("stopBtn").onclick = stop;
 $("resetBtn").onclick = () => {
   if (mode === "pushup") { push.reset(); armRef = null; }
   else {
-    box.reset(); box.round.startTotal = 0;
+    box.reset(); stepBack.reset(); box.round.startTotal = 0;
     for (const k in typeCount) typeCount[k] = 0; lastPunch.L = lastPunch.R = null;
     guardDrops.L = guardDrops.R = 0;
     combo.stats = { n: 0, perfect: 0, hands: 0 }; updateComboStats();
@@ -1874,6 +2043,7 @@ $("copyBtn").onclick = copyReport;
 $("recBtn").onclick = () => rec ? stopRec() : startRec("123");
 $("recBtn2").onclick = () => rec ? stopRec() : startRec("1212");
 $("recBtn3").onclick = () => rec ? stopRec() : startRec("play");
+$("recBtn4").onclick = () => rec ? stopRec() : startRec("body");
 $("recSaveBtn").onclick = saveRec;
 $("placeBtn").onclick = startPlace;
 $("guardOn").checked = guard.on;
