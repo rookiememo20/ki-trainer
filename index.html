@@ -366,7 +366,7 @@
 </div>
 
 <script type="module">
-const APP_VER = "v9.15";
+const APP_VER = "v9.16";
 import { PoseLandmarker, FilesetResolver, DrawingUtils }
   from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
 
@@ -790,6 +790,14 @@ function classifyPunch(feat, hand, calib, leadH = "L") {
     if (lead && best === "straight" && feat.pU != null && feat.pU < -0.3 && feat.eU < 0.2) return "none";
     // "Jab" mit senkrecht hängendem Oberarm (viel tiefer als bei jedem deiner Jabs) = verdeckte Hand, kein Schlag
     if (lead && best === "straight" && C.straight && feat.uaU < C.straight.uaU - 0.9) return "none";
+    // Finten / Spielen mit der Hand: Haken und Uppercuts mit sehr kleiner Weite (G < 0,8) sind kein Schlag.
+    // Deine echten Haken und Uppercuts lagen in allen Aufnahmen darüber, Finten bei 0,4–0,8 (Aufnahme 7).
+    // Falls deine Kalibrierung kleinere Weiten hat, gilt höchstens 75 % von deren Median.
+    if (best && best !== "straight") {
+      const gs = ((calib.samples || []).filter(x => x.hand === hand && x.type !== "straight").map(x => x.G).filter(g => g > 0)).sort((x, y) => x - y);
+      const lim = gs.length ? Math.min(0.8, 0.75 * gs[Math.floor(gs.length / 2)]) : 0.8;
+      if (feat.G < lim) return "none";
+    }
     if (best) return best;
   }
   // Ohne Kalibrierung: Faustregeln
