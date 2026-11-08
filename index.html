@@ -366,7 +366,7 @@
 </div>
 
 <script type="module">
-const APP_VER = "v9.17";
+const APP_VER = "v9.18";
 import { PoseLandmarker, FilesetResolver, DrawingUtils }
   from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
 
@@ -1613,7 +1613,7 @@ function announceCombo(now) {
   combo.phase = "listen";
   if (rec && rec.kind === "combo") rec.cues.push([Math.round(now - rec.t0), combo.target.join(""), combo.target.join("-")]);
   // Zeit zum Schlagen: Ansage + ca. 0,6 s pro Schlag + Reserve
-  combo.listenUntil = now + (mode === "both" ? 900 : 450) * combo.target.length + 600 * combo.target.length + 1500;
+  combo.listenUntil = now + (mode === "both" ? 900 : 450) * combo.target.length + 600 * combo.target.length + 3000;   // +1,5 s mehr Reaktionszeit (Aufnahmen: du schlägst oft erst 3–4 s nach der Ansage)
   speak(text);
 }
 function comboPunch(code, t) {
