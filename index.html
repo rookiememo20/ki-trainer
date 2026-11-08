@@ -366,7 +366,7 @@
 </div>
 
 <script type="module">
-const APP_VER = "v9.16";
+const APP_VER = "v9.17";
 import { PoseLandmarker, FilesetResolver, DrawingUtils }
   from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
 
@@ -680,7 +680,7 @@ class PunchArm {
       if (this.reStart) {
         if (t - this.reStart.t > 450 || this.pending) this.reStart = null;
         // frühestens 0,1 s danach: so schnell kann kein echter neuer Schlag kommen (deine: ab 0,2 s)
-        else if (t - this.reStart.t >= 100 && dP(p, this.reStart.p0) / sw >= rise && (cur.ext2 >= 0.6 || cur.faIn >= 0.6) && cur.uaU >= (this.uaRef ?? -0.25) - 0.35) re = true;
+        else if (t - this.reStart.t >= 100 && dP(p, this.reStart.p0) / sw >= rise && (cur.ext2 >= 0.6 || cur.faIn >= 0.6 || cur.faUp >= 0.7) && cur.uaU >= (this.uaRef ?? -0.25) - 0.35) re = true;
       }
       if ((G - base >= rise || fast || re) && t - this.firedAt > 140) {
         if (this.pending) out.push(this.finishPending());
@@ -902,7 +902,7 @@ class PunchCounter {
           const guardSlide = k === (S.stance === "southpaw" ? "R" : "L") && ev.gap < 300 && f.uaU < uaLim && Math.max(f.ext3, f.ext2) < 0.9 && !(f.faUp > 0.65 && f.upGain > 0.6);   // echter Uppercut bleibt
           // c) kurz (< 0,2 s) nach dem anderen Schlag, im Bild viel weniger gestreckt als jeder deiner echten Schläge → Mitbewegung
           //    (nicht bei Haken-Form: Unterarm quer und Faust hebt sich deutlich – Mitbewegungen: quer ≤ 0,35, Hebung ≤ 0,4)
-          const flat = this[k].e2Ref != null && ev.gap < 300 && f.ext2 < Math.min(0.5, this[k].e2Ref - 0.2) && !(f.faUp > 0.65 && f.upGain > 0.6) && !(f.faIn >= 0.6 && f.upGain >= 0.7);
+          const flat = this[k].e2Ref != null && ev.gap < 300 && f.ext2 < Math.min(0.5, this[k].e2Ref - 0.15) && !(f.faUp > 0.65 && f.upGain > 0.6) && !(f.faIn >= 0.6 && f.upGain >= 0.7);
           if (weak || guardSlide || flat) {
             this[k].count = Math.max(0, this[k].count - 1);
             this[k].reStart = this[k].lastP ? { t, p0: this[k].lastP } : null;   // Zweite Chance für einen Schlag direkt danach
